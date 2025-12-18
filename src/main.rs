@@ -1,4 +1,3 @@
-// Declare the parser module
 mod parser;
 
 fn main() {
@@ -7,7 +6,7 @@ fn main() {
   // Quick test that our types work
   let node = parser::JsonNode {
       key: None,
-      node_type: parser::JsonType::Object,
+      value: parser::JsonValue::Object,
       depth: 0,
       children: vec![],
   };
