@@ -10,7 +10,7 @@ pub struct JsonTree {
 }
 
 impl JsonTree {
-    /// Create a new empty tree
+      /// Create a new empty tree
     pub fn new() -> Self {
         JsonTree {
             nodes: Vec::new(),
@@ -23,6 +23,11 @@ impl JsonTree {
         let index = self.nodes.len();
         self.nodes.push(node);
         index
+    }
+
+    /// Set the root index
+    pub fn set_root(&mut self, index: usize) {
+        self.root_index = index;
     }
 
     /// Get a node by index
