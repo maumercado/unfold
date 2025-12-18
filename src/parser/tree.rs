@@ -1,4 +1,5 @@
 use super::node::{JsonNode, JsonValue};
+use std::fmt::Write;
 
 /// A complete JSON tree stored as a flat array of nodes
 #[derive(Debug)]
@@ -43,6 +44,53 @@ impl JsonTree {
     /// Get the total number of nodes
     pub fn node_count(&self) -> usize {
         self.nodes.len()
+    }
+
+    /// Get a mutable reference to a node
+    pub fn get_node_mut(&mut self, index: usize) -> Option<&mut JsonNode> {
+        self.nodes.get_mut(index)
+    }
+
+    /// Pretty print the tree structure
+    pub fn print_tree(&self) -> String {
+        let mut output = String::new();
+        if let Some(_root) = self.root() {
+            self.print_node(&mut output, self.root_index, 0);
+        }
+        output
+    }
+
+    /// Recursively print a node and its children
+    fn print_node(&self, output: &mut String, index: usize, indent: usize) {
+        let Some(node) = self.get_node(index) else {
+            return;
+        };
+
+        // Create indentation
+        let prefix = "  ".repeat(indent);
+
+        // Format the node
+        let key_str = match &node.key {
+            Some(k) => format!("\"{}\": ", k),
+            None => String::new(),
+        };
+
+        let value_str = match &node.value {
+            JsonValue::Null => "null".to_string(),
+            JsonValue::Bool(b) => b.to_string(),
+            JsonValue::Number(n) => n.to_string(),
+            JsonValue::String(s) => format!("\"{}\"", s),
+            JsonValue::Array => format!("[{} items]", node.children.len()),
+            JsonValue::Object => format!("{{{}}} fields", node.children.len()),
+        };
+
+        // Write this node
+        let _ = writeln!(output, "{}{}{}", prefix, key_str, value_str);
+
+        // Recursively print children
+        for &child_index in &node.children {
+            self.print_node(output, child_index, indent + 1);
+        }
     }
 }
 
@@ -111,4 +159,24 @@ mod tests {
         let child = tree.get_node(root.children[0]).unwrap();
         assert_eq!(child.key, Some(String::from("name")));
     }
+
+    #[test]
+    fn test_print_tree() {
+        use crate::parser::builder::build_tree;
+        use serde_json::json;
+
+        let value = json!({
+            "name": "Unfold",
+            "version": "0.1.0"
+        });
+
+        let tree = build_tree(&value);
+        let output = tree.print_tree();
+
+        println!("{}", output);  // Will show when running with --nocapture
+
+        assert!(output.contains("name"));
+        assert!(output.contains("Unfold"));
+        assert!(output.contains("version"));
+  }
 }

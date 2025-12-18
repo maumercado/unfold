@@ -1,0 +1,22 @@
+{
+  "app": {
+    "name": "Unfold",
+    "version": "0.1.0",
+    "description": "High-performance JSON viewer"
+  },
+  "features": [
+    "parsing",
+    "tree view",
+    "searching",
+    "diffing"
+  ],
+  "config": {
+    "theme": "dark",
+    "fontSize": 14,
+    "showLineNumbers": true
+  },
+  "stats": {
+    "linesOfCode": 250,
+    "tests": 14
+  }
+}
