@@ -1,40 +1,49 @@
 mod parser;
 
-use std::env;
-use std::fs;
+use iced::widget::{column, container, text};
+use iced::{Element, Length, Center};
 
-fn main() -> Result<(), Box<dyn std::error::Error>> {
-    println!("🔍 Unfold - JSON Viewer\n");
+pub fn main() -> iced::Result {
+    iced::run(App::update, App::view)
+}
 
-    // Get filename from command line arguments
-    let args: Vec<String> = env::args().collect();
+// The application state (Model)
+#[derive(Default)]
+struct App {
+    // We'll add state here soon
+}
 
-    if args.len() < 2 {
-        println!("Usage: unfold <filename.json>");
-        println!("\nExample: cargo run -- test.json");
-        return Ok(());
+// Messages that can be sent to update the app
+#[derive(Debug, Clone)]
+enum Message {
+    // We'll add messages here soon
+}
+
+impl App {
+    // Handle messages and update state
+    fn update(&mut self, message: Message) {
+        match message {
+            // Handle messages here
+        }
     }
 
-    let filename = &args[1];
-    println!("📄 Reading: {}\n", filename);
+    // Render the UI
+    fn view(&self) -> Element<Message> {
+        let content = column![
+            text("Unfold").size(32),
+            text("High-performance JSON Viewer").size(16),
+            text(""),
+            text("Drop a JSON file here or use File > Open").size(14),
+        ]
+        .spacing(10)
+        .padding(20)
+        .align_x(Center);
 
-    // Read the file
-    let contents = fs::read_to_string(filename)?;
-
-    // Parse JSON with serde_json
-    let json_value: serde_json::Value = serde_json::from_str(&contents)?;
-
-    // Build our tree
-    let tree = parser::build_tree(&json_value);
-
-    // Print stats
-    println!("✓ Parsed successfully!");
-    println!("  Nodes: {}", tree.node_count());
-    println!();
-
-    // Print the tree
-    println!("📊 Tree structure:\n");
-    println!("{}", tree.print_tree());
-
-    Ok(())
+        container(content)
+            .width(Length::Fill)
+            .height(Length::Fill)
+            .center_x(Length::Fill)
+            .center_y(Length::Fill)
+            .into()
+    }
 }
