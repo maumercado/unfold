@@ -34,9 +34,12 @@ fn build_node(
         }
         Value::String(s) => (JsonValue::String(s.clone()), vec![]),
         Value::Array(arr) => {
-            // Collect array items as (None, value) pairs
+            // Collect array items with index as key: [0], [1], etc.
             let children: Vec<(Option<String>, &Value)> =
-                arr.iter().map(|v| (None, v)).collect();
+                arr.iter()
+                    .enumerate()
+                    .map(|(i, v)| (Some(format!("[{}]", i)), v))
+                    .collect();
             (JsonValue::Array, children)
         }
         Value::Object(obj) => {
