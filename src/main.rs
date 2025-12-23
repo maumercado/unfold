@@ -11,9 +11,11 @@ const COLOR_BOOL: Color = Color::from_rgb(0.8, 0.5, 0.7);      // Purple for boo
 const COLOR_NULL: Color = Color::from_rgb(0.6, 0.6, 0.6);      // Gray for null
 const COLOR_BRACKET: Color = Color::from_rgb(0.7, 0.7, 0.7);   // Light gray for brackets
 const COLOR_INDICATOR: Color = Color::from_rgb(0.5, 0.5, 0.5); // Dim for expand indicator
+const COLOR_ROW_ODD: Color = Color::from_rgba(1.0, 1.0, 1.0, 0.03); // Subtle alternating stripe
 use parser::{JsonTree, JsonValue};
 use std::fs;
 use std::path::PathBuf;
+use std::time::{Duration, Instant};
 
 pub fn main() -> iced::Result {
     iced::application(App::boot, App::update, App::view)
@@ -33,6 +35,8 @@ struct App {
     current_file: Option<PathBuf>,
     // Display preferences
     preferences: Preferences,
+    // Time taken to load and parse the file
+    load_time: Option<Duration>,
 }
 
 // User-configurable display preferences
@@ -60,6 +64,7 @@ impl Default for App {
             status: String::from("No file loaded"),
             current_file: None,
             preferences: Preferences::default(),
+            load_time: None,
         }
     }
 }
@@ -103,10 +108,10 @@ impl App {
         };
 
         // Estimate characters for this line:
-        // prefix (3 chars per depth) + indicator (2) + key + " : " + value
+        // prefix (3 chars per depth) + indicator (2) + key + ": " + value
         let prefix_len = depth * 3;
         let indicator_len = 2;
-        let key_len = node.key.as_ref().map(|k| k.len() + 3).unwrap_or(0);  // key + " : "
+        let key_len = node.key.as_ref().map(|k| k.len() + 3).unwrap_or(0);  // key + ": "
         let value_len = match &node.value {
             JsonValue::Null => 4,
             JsonValue::Bool(b) => b.to_string().len(),
@@ -156,18 +161,21 @@ impl App {
                 // File dialog returned - either a path or None (cancelled)
                 match path_option {
                     Some(path) => {
-                        // Try to load the file
+                        // Try to load the file, measuring time
+                        let start = Instant::now();
                         match fs::read_to_string(&path) {
                             Ok(contents) => {
                                 match serde_json::from_str::<serde_json::Value>(&contents) {
                                     Ok(json_value) => {
                                         let tree = parser::build_tree(&json_value);
+                                        let elapsed = start.elapsed();
                                         let filename = path.file_name()
                                             .map(|n| n.to_string_lossy().to_string())
                                             .unwrap_or_else(|| "unknown".to_string());
                                         self.status = format!("✓ {} ({} nodes)", filename, tree.node_count());
                                         self.tree = Some(tree);
                                         self.current_file = Some(path);
+                                        self.load_time = Some(elapsed);
 
                                         // Auto-resize window to fit content
                                         let new_width = self.calculate_max_width();
@@ -213,28 +221,28 @@ impl App {
             Some(tree) => {
                 // Build interactive tree view
                 let mut elements: Vec<Element<'_, Message>> = Vec::new();
+                let mut row_index: usize = 0;
 
                 // Skip the root node, directly render its children (like Dadroit)
                 if let Some(root) = tree.get_node(tree.root_index()) {
                     let child_count = root.children.len();
                     for (i, &child_index) in root.children.iter().enumerate() {
                         let is_last = i == child_count - 1;
-                        self.collect_nodes(tree, child_index, &mut elements, "", is_last, false);
+                        self.collect_nodes(tree, child_index, &mut elements, "", is_last, false, &mut row_index);
                     }
                 }
 
-                let nodes_column = column(elements).spacing(0);  // No spacing so │ lines connect
+                let nodes_column = column(elements)
+                    .spacing(0)
+                    .width(Fill);
 
                 scrollable(
                     container(nodes_column)
-                        .padding([10, 5])  // Less horizontal padding, tree starts near border
+                        .width(Fill)
+                        .padding([10, 0])  // Only vertical padding, zebra extends to edges
                 )
                 .height(Length::Fill)
                 .width(Fill)
-                .direction(scrollable::Direction::Both {
-                    vertical: scrollable::Scrollbar::default(),
-                    horizontal: scrollable::Scrollbar::default(),
-                })
                 .into()
             }
             None => {
@@ -265,9 +273,31 @@ impl App {
             }
         };
 
-        // When file is loaded, just show the tree (full screen)
+        // When file is loaded, show tree + status bar
         if self.tree.is_some() {
-            tree_view
+            let load_time_str: String = self.load_time
+                .map(|d| format!("Load: {}ms", d.as_millis()))
+                .unwrap_or_default();
+
+            let node_count: String = self.tree.as_ref()
+                .map(|t| format!("Nodes: {}", t.node_count()))
+                .unwrap_or_default();
+
+            let status_bar = container(
+                row![
+                    text(node_count).size(12).color(COLOR_BRACKET),
+                    text("  ").size(12),
+                    text(load_time_str).size(12).color(COLOR_BRACKET),
+                ]
+            )
+            .width(Fill)
+            .padding([5, 10])
+            .style(|_theme| container::Style {
+                background: Some(Color::from_rgb(0.15, 0.15, 0.15).into()),
+                ..Default::default()
+            });
+
+            column![tree_view, status_bar].into()
         } else {
             tree_view  // This is the welcome screen
         }
@@ -277,6 +307,7 @@ impl App {
     // `prefix` contains the tree lines for ancestor levels (│ or space)
     // `is_last` indicates if this node is the last child of its parent
     // `is_root` indicates if this is the root node (no prefix needed)
+    // `row_index` tracks row number for alternating backgrounds
     fn collect_nodes<'a>(
         &self,
         tree: &JsonTree,
@@ -285,28 +316,35 @@ impl App {
         prefix: &str,
         is_last: bool,
         is_root: bool,
+        row_index: &mut usize,
     ) {
         let Some(node) = tree.get_node(index) else {
             return;
         };
 
-        let prefs = &self.preferences;
-
         // Build the tree line prefix for this node
-        // Dadroit style: first level has no connectors, deeper levels have simple connectors
+        // The prefix shows vertical lines (│) for ancestor levels that have more siblings
+        // Using "├─ " and "│  " pattern like Dadroit (3 chars per level)
         let (current_prefix, child_prefix) = if is_root {
             // Root node has no prefix
             (String::new(), String::new())
         } else if node.depth == 1 {
-            // First level (direct children of root) - no connectors, like Dadroit
-            (String::new(), "   ".to_string())  // Children get indentation
+            // First level - connector with dash
+            let connector = if is_last { "└─ " } else { "├─ " };
+            // Children: vertical line + 2 spaces, or 3 spaces
+            let child = if is_last { "   ".to_string() } else { "│  ".to_string() };
+            (connector.to_string(), child)
         } else {
-            // Deeper levels: simple connectors with indentation
+            // Deeper levels: connectors with proper vertical lines
             let connector = if is_last { "└─ " } else { "├─ " };
             let current = format!("{}{}", prefix, connector);
 
-            // Children get more indentation (spaces only, no vertical lines)
-            let child = format!("{}   ", prefix);  // 3 spaces for alignment
+            // Children: vertical line + 2 spaces, or 3 spaces
+            let child = if is_last {
+                format!("{}   ", prefix)  // 3 spaces
+            } else {
+                format!("{}│  ", prefix)  // vertical + 2 spaces
+            };
 
             (current, child)
         };
@@ -337,13 +375,14 @@ impl App {
         // Build the row for this node
         let node_row: Element<'a, Message> = if node.is_expandable() {
             // Expandable node - make it clickable
-            let indicator = if node.expanded { "⊟ " } else { "⊞ " };
+            let indicator = if node.expanded { "⊟" } else { "⊞" };
 
             // Build row with colored parts inside button
             // Clone current_prefix to transfer ownership (avoids lifetime issues)
             let mut row_elements: Vec<Element<'a, Message>> = vec![
-                text(current_prefix.clone()).font(Font::MONOSPACE).size(14).color(COLOR_BRACKET).into(),
-                text(indicator).font(Font::MONOSPACE).size(14).color(COLOR_INDICATOR).into(),
+                text(current_prefix.clone()).font(Font::MONOSPACE).size(13).color(COLOR_BRACKET).into(),
+                text(indicator).font(Font::MONOSPACE).size(13).color(COLOR_INDICATOR).into(),
+                text(" ").font(Font::MONOSPACE).size(13).into(),  // Space after indicator
             ];
 
             // Add key if present (no quotes, cleaner look)
@@ -351,14 +390,14 @@ impl App {
                 row_elements.push(
                     text(k.clone())
                         .font(Font::MONOSPACE)
-                        .size(14)
+                        .size(13)
                         .color(COLOR_KEY)
                         .into()
                 );
                 row_elements.push(
-                    text(" : ")
+                    text(": ")
                         .font(Font::MONOSPACE)
-                        .size(14)
+                        .size(13)
                         .color(COLOR_BRACKET)
                         .into()
                 );
@@ -373,8 +412,8 @@ impl App {
             // Leaf node - not clickable, but still styled
             // Add same spacing as indicator "⊟ " (2 chars) to align with expandable nodes
             let mut row_elements: Vec<Element<'a, Message>> = vec![
-                text(current_prefix).font(Font::MONOSPACE).size(14).color(COLOR_BRACKET).into(),
-                text("  ").font(Font::MONOSPACE).size(14).into(),  // 2 chars to match "⊟ "
+                text(current_prefix).font(Font::MONOSPACE).size(13).color(COLOR_BRACKET).into(),
+                text("  ").font(Font::MONOSPACE).size(13).into(),  // 2 spaces to match "⊟ "
             ];
 
             // Add key if present (no quotes)
@@ -382,14 +421,14 @@ impl App {
                 row_elements.push(
                     text(k.clone())
                         .font(Font::MONOSPACE)
-                        .size(14)
+                        .size(13)
                         .color(COLOR_KEY)
                         .into()
                 );
                 row_elements.push(
-                    text(" : ")
+                    text(": ")
                         .font(Font::MONOSPACE)
-                        .size(14)
+                        .size(13)
                         .color(COLOR_BRACKET)
                         .into()
                 );
@@ -399,7 +438,7 @@ impl App {
             row_elements.push(
                 text(value_str)
                     .font(Font::MONOSPACE)
-                    .size(14)
+                    .size(13)
                     .color(value_color)
                     .into()
             );
@@ -407,8 +446,19 @@ impl App {
             row(row_elements).spacing(0).into()
         };
 
-        // Add the row directly
-        elements.push(node_row);
+        // Wrap all rows in containers with Fill width, odd rows get background
+        let row_container = if *row_index % 2 == 1 {
+            container(node_row)
+                .width(Fill)
+                .style(|_theme| container::Style {
+                    background: Some(COLOR_ROW_ODD.into()),
+                    ..Default::default()
+                })
+        } else {
+            container(node_row).width(Fill)
+        };
+        elements.push(row_container.into());
+        *row_index += 1;
 
         // Collect children if expanded
         if node.expanded {
@@ -416,7 +466,7 @@ impl App {
             let child_count = children.len();
             for (i, &child_index) in children.iter().enumerate() {
                 let is_last_child = i == child_count - 1;
-                self.collect_nodes(tree, child_index, elements, &child_prefix, is_last_child, false);
+                self.collect_nodes(tree, child_index, elements, &child_prefix, is_last_child, false, row_index);
             }
         }
     }
