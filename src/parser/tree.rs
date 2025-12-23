@@ -51,6 +51,20 @@ impl JsonTree {
         self.nodes.get_mut(index)
     }
 
+    /// Toggle the expanded state of a node
+    pub fn toggle_expanded(&mut self, index: usize) {
+        if let Some(node) = self.nodes.get_mut(index) {
+            if node.is_expandable() {
+                node.expanded = !node.expanded;
+            }
+        }
+    }
+
+    /// Get the root index
+    pub fn root_index(&self) -> usize {
+        self.root_index
+    }
+
     /// Pretty print the tree structure
     pub fn print_tree(&self) -> String {
         let mut output = String::new();
@@ -69,6 +83,13 @@ impl JsonTree {
         // Create indentation
         let prefix = "  ".repeat(indent);
 
+        // Expand/collapse indicator for containers
+        let expand_indicator = if node.is_expandable() {
+            if node.expanded { "▼ " } else { "▶ " }
+        } else {
+            "  "
+        };
+
         // Format the node
         let key_str = match &node.key {
             Some(k) => format!("\"{}\": ", k),
@@ -81,15 +102,17 @@ impl JsonTree {
             JsonValue::Number(n) => n.to_string(),
             JsonValue::String(s) => format!("\"{}\"", s),
             JsonValue::Array => format!("[{} items]", node.children.len()),
-            JsonValue::Object => format!("{{{}}} fields", node.children.len()),
+            JsonValue::Object => format!("{{{} fields}}", node.children.len()),
         };
 
         // Write this node
-        let _ = writeln!(output, "{}{}{}", prefix, key_str, value_str);
+        let _ = writeln!(output, "{}{}{}{}", prefix, expand_indicator, key_str, value_str);
 
-        // Recursively print children
-        for &child_index in &node.children {
-            self.print_node(output, child_index, indent + 1);
+        // Only print children if expanded
+        if node.expanded {
+            for &child_index in &node.children {
+                self.print_node(output, child_index, indent + 1);
+            }
         }
     }
 }
@@ -115,6 +138,7 @@ mod tests {
             value: JsonValue::Object,
             depth: 0,
             children: vec![],
+            expanded: true,
         };
 
         let index = tree.add_node(node);
@@ -135,6 +159,7 @@ mod tests {
             value: JsonValue::String(String::from("Unfold")),
             depth: 1,
             children: vec![],
+            expanded: false,
         };
         let name_index = tree.add_node(name_node);
 
@@ -144,6 +169,7 @@ mod tests {
             value: JsonValue::Object,
             depth: 0,
             children: vec![name_index],
+            expanded: true,
         };
         tree.add_node(root_node);
 
@@ -158,6 +184,28 @@ mod tests {
         // Check child
         let child = tree.get_node(root.children[0]).unwrap();
         assert_eq!(child.key, Some(String::from("name")));
+    }
+
+    #[test]
+    fn test_toggle_expanded() {
+        use crate::parser::builder::build_tree;
+        use serde_json::json;
+
+        let value = json!({"name": "Unfold"});
+        let mut tree = build_tree(&value);
+
+        let root_idx = tree.root_index();
+
+        // Should start expanded
+        assert!(tree.get_node(root_idx).unwrap().expanded);
+
+        // Toggle to collapse
+        tree.toggle_expanded(root_idx);
+        assert!(!tree.get_node(root_idx).unwrap().expanded);
+
+        // Toggle to expand again
+        tree.toggle_expanded(root_idx);
+        assert!(tree.get_node(root_idx).unwrap().expanded);
     }
 
     #[test]

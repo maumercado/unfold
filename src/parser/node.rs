@@ -20,6 +20,15 @@ pub struct JsonNode {
     pub depth: usize,
     /// Indices of child nodes (for arrays and objects)
     pub children: Vec<usize>,
+    /// Whether this node is expanded (for containers)
+    pub expanded: bool,
+}
+
+impl JsonNode {
+    /// Check if this node can be expanded (has children)
+    pub fn is_expandable(&self) -> bool {
+        !self.children.is_empty()
+    }
 }
 
 #[cfg(test)]
@@ -33,11 +42,13 @@ mod tests {
             value: JsonValue::Null,
             depth: 0,
             children: vec![],
+            expanded: false,
         };
 
         assert_eq!(node.value, JsonValue::Null);
         assert_eq!(node.depth, 0);
         assert!(node.children.is_empty());
+        assert!(!node.is_expandable());
     }
 
     #[test]
@@ -47,6 +58,7 @@ mod tests {
             value: JsonValue::String(String::from("Hello, Rust!")),
             depth: 1,
             children: vec![],
+            expanded: false,
         };
 
         assert_eq!(node.key, Some(String::from("greeting")));
@@ -65,6 +77,7 @@ mod tests {
             value: JsonValue::Number(42.0),
             depth: 1,
             children: vec![],
+            expanded: false,
         };
 
         match node.value {
@@ -80,6 +93,7 @@ mod tests {
             value: JsonValue::Bool(true),
             depth: 1,
             children: vec![],
+            expanded: false,
         };
 
         assert_eq!(node.value, JsonValue::Bool(true));
@@ -91,12 +105,14 @@ mod tests {
             key: Some(String::from("user")),
             value: JsonValue::Object,
             depth: 1,
-            children: vec![2, 3, 4],  // Indices of child nodes
+            children: vec![2, 3, 4],
+            expanded: true,
         };
 
         assert_eq!(node.value, JsonValue::Object);
         assert_eq!(node.children.len(), 3);
         assert_eq!(node.children[0], 2);
+        assert!(node.is_expandable());
     }
 
     #[test]
@@ -106,9 +122,11 @@ mod tests {
             value: JsonValue::Array,
             depth: 1,
             children: vec![5, 6, 7, 8],
+            expanded: true,
         };
 
         assert_eq!(node.value, JsonValue::Array);
         assert_eq!(node.children.len(), 4);
+        assert!(node.is_expandable());
     }
 }

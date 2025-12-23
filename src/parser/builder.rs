@@ -55,12 +55,16 @@ fn build_node(
         })
         .collect();
 
+    // Containers start expanded, leaf nodes don't need expansion
+    let is_container = matches!(node_value, JsonValue::Object | JsonValue::Array);
+
     // Now create this node with the child indices
     let node = JsonNode {
         key,
         value: node_value,
         depth,
         children: child_indices,
+        expanded: is_container,  // Start expanded for containers
     };
 
     // Add to tree and return index
