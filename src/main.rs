@@ -1,9 +1,10 @@
 mod parser;
 
 use iced::widget::{button, column, container, row, scrollable, text};
-use iced::{Element, Length, Center, Color};
+use iced::{Element, Length, Center, Color, Task};
 use parser::{JsonTree, JsonValue};
 use std::fs;
+use std::path::PathBuf;
 
 pub fn main() -> iced::Result {
     iced::run(App::update, App::view)
@@ -15,6 +16,8 @@ struct App {
     tree: Option<JsonTree>,
     // Status message to show the user
     status: String,
+    // Currently loaded file path
+    current_file: Option<PathBuf>,
 }
 
 impl Default for App {
@@ -22,6 +25,7 @@ impl Default for App {
         App {
             tree: None,
             status: String::from("No file loaded"),
+            current_file: None,
         }
     }
 }
@@ -29,32 +33,69 @@ impl Default for App {
 // Messages that can be sent to update the app
 #[derive(Debug, Clone)]
 enum Message {
-    LoadSampleFile,
+    OpenFileDialog,                    // User clicked "Open File" button
+    FileSelected(Option<PathBuf>),     // File dialog returned (None if cancelled)
     ToggleNode(usize),
 }
 
 impl App {
     // Handle messages and update state
-    fn update(&mut self, message: Message) {
+    // Returns a Task for async operations (like file dialogs)
+    fn update(&mut self, message: Message) -> Task<Message> {
         match message {
-            Message::LoadSampleFile => {
-                match fs::read_to_string("sample.json") {
-                    Ok(contents) => {
-                        match serde_json::from_str::<serde_json::Value>(&contents) {
-                            Ok(json_value) => {
-                                let tree = parser::build_tree(&json_value);
-                                self.status = format!("✓ Loaded {} nodes", tree.node_count());
-                                self.tree = Some(tree);
+            Message::OpenFileDialog => {
+                // Return a Task that opens the file dialog asynchronously
+                Task::perform(
+                    async {
+                        // rfd::AsyncFileDialog works with async-std (which rfd uses by default)
+                        let file = rfd::AsyncFileDialog::new()
+                            .add_filter("JSON", &["json"])
+                            .add_filter("All Files", &["*"])
+                            .set_title("Open JSON File")
+                            .pick_file()
+                            .await;
+
+                        // Convert FileHandle to PathBuf
+                        file.map(|f| f.path().to_path_buf())
+                    },
+                    Message::FileSelected,  // This message will be sent with the result
+                )
+            }
+            Message::FileSelected(path_option) => {
+                // File dialog returned - either a path or None (cancelled)
+                match path_option {
+                    Some(path) => {
+                        // Try to load the file
+                        match fs::read_to_string(&path) {
+                            Ok(contents) => {
+                                match serde_json::from_str::<serde_json::Value>(&contents) {
+                                    Ok(json_value) => {
+                                        let tree = parser::build_tree(&json_value);
+                                        let filename = path.file_name()
+                                            .map(|n| n.to_string_lossy().to_string())
+                                            .unwrap_or_else(|| "unknown".to_string());
+                                        self.status = format!("✓ {} ({} nodes)", filename, tree.node_count());
+                                        self.tree = Some(tree);
+                                        self.current_file = Some(path);
+                                    }
+                                    Err(e) => {
+                                        self.status = format!("✗ Parse error: {}", e);
+                                        self.tree = None;
+                                        self.current_file = None;
+                                    }
+                                }
                             }
                             Err(e) => {
-                                self.status = format!("✗ Parse error: {}", e);
+                                self.status = format!("✗ File error: {}", e);
                                 self.tree = None;
+                                self.current_file = None;
                             }
                         }
+                        Task::none()  // No follow-up task needed
                     }
-                    Err(e) => {
-                        self.status = format!("✗ File error: {}", e);
-                        self.tree = None;
+                    None => {
+                        // User cancelled the dialog - do nothing
+                        Task::none()
                     }
                 }
             }
@@ -62,6 +103,7 @@ impl App {
                 if let Some(tree) = &mut self.tree {
                     tree.toggle_expanded(index);
                 }
+                Task::none()  // No async work needed
             }
         }
     }
@@ -75,9 +117,9 @@ impl App {
         ]
         .spacing(5);
 
-        // Load button
-        let load_button = button(text("Load sample.json"))
-            .on_press(Message::LoadSampleFile)
+        // Open file button
+        let open_button = button(text("Open File..."))
+            .on_press(Message::OpenFileDialog)
             .padding(10);
 
         // Tree display section
@@ -105,7 +147,7 @@ impl App {
         // Main layout
         let content = column![
             header,
-            load_button,
+            open_button,
             tree_view,
         ]
         .spacing(15)
