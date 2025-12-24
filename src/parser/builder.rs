@@ -58,8 +58,8 @@ fn build_node(
         })
         .collect();
 
-    // Containers start expanded, leaf nodes don't need expansion
-    let is_container = matches!(node_value, JsonValue::Object | JsonValue::Array);
+    // All containers start collapsed for better performance with large files
+    // Users expand what they need to see
 
     // Now create this node with the child indices
     let node = JsonNode {
@@ -67,7 +67,7 @@ fn build_node(
         value: node_value,
         depth,
         children: child_indices,
-        expanded: is_container,  // Start expanded for containers
+        expanded: false,  // Start collapsed - expand on demand
     };
 
     // Add to tree and return index

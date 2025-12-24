@@ -1,6 +1,7 @@
 mod parser;
 
-use iced::widget::{button, column, container, row, scrollable, text};
+use iced::widget::{button, column, container, row, scrollable, text, Space};
+use iced::widget::scrollable::Viewport;
 use iced::{Element, Font, Length, Center, Fill, Color, Size, Task, window};
 
 // Color scheme for syntax highlighting
@@ -12,10 +13,37 @@ const COLOR_NULL: Color = Color::from_rgb(0.6, 0.6, 0.6);      // Gray for null
 const COLOR_BRACKET: Color = Color::from_rgb(0.7, 0.7, 0.7);   // Light gray for brackets
 const COLOR_INDICATOR: Color = Color::from_rgb(0.5, 0.5, 0.5); // Dim for expand indicator
 const COLOR_ROW_ODD: Color = Color::from_rgba(1.0, 1.0, 1.0, 0.03); // Subtle alternating stripe
+
+// Virtual scrolling constants
+const ROW_HEIGHT: f32 = 16.0;      // Fixed height per row (tight for connected tree lines)
+const BUFFER_ROWS: usize = 5;      // Extra rows above/below (reduced for performance)
+
 use parser::{JsonTree, JsonValue};
 use std::fs;
 use std::path::PathBuf;
 use std::time::{Duration, Instant};
+
+/// A flattened row ready for rendering
+/// This pre-computes everything needed to render a single tree row
+#[derive(Debug, Clone)]
+struct FlatRow {
+    /// Index in the original JsonTree (for toggle events)
+    node_index: usize,
+    /// Pre-built prefix string (tree lines: "│  ├─ ")
+    prefix: String,
+    /// The key to display (if any)
+    key: Option<String>,
+    /// The value to display (formatted string)
+    value_display: String,
+    /// Color for the value
+    value_color: Color,
+    /// Is this node expandable (has children)?
+    is_expandable: bool,
+    /// Is this node currently expanded?
+    is_expanded: bool,
+    /// Row index in flattened list (for zebra striping)
+    row_index: usize,
+}
 
 pub fn main() -> iced::Result {
     iced::application(App::boot, App::update, App::view)
@@ -37,6 +65,12 @@ struct App {
     preferences: Preferences,
     // Time taken to load and parse the file
     load_time: Option<Duration>,
+    // Flattened rows for virtual scrolling (rebuilt when tree changes)
+    flat_rows: Vec<FlatRow>,
+    // Viewport height in pixels (updated on resize)
+    viewport_height: f32,
+    // Current scroll offset in pixels (for virtual scrolling)
+    scroll_offset: f32,
 }
 
 // User-configurable display preferences
@@ -65,6 +99,9 @@ impl Default for App {
             current_file: None,
             preferences: Preferences::default(),
             load_time: None,
+            flat_rows: Vec::new(),
+            viewport_height: 600.0,  // Default, will be updated
+            scroll_offset: 0.0,
         }
     }
 }
@@ -75,12 +112,213 @@ enum Message {
     OpenFileDialog,                    // User clicked "Open File" button
     FileSelected(Option<PathBuf>),     // File dialog returned (None if cancelled)
     ToggleNode(usize),
+    Scrolled(Viewport),                // User scrolled the tree view
 }
 
 impl App {
     // Initialize the application (called once at startup)
     fn boot() -> (Self, Task<Message>) {
         (App::default(), Task::none())
+    }
+
+    /// Flatten the tree into a Vec<FlatRow> for virtual scrolling
+    /// This walks only expanded nodes, pre-computing all display data
+    /// Note: This is a static method to avoid borrow checker issues
+    fn flatten_visible_nodes(tree: &JsonTree) -> Vec<FlatRow> {
+        let mut rows = Vec::new();
+
+        // Start from root's children (skip root node like collect_nodes does)
+        if let Some(root) = tree.get_node(tree.root_index()) {
+            let child_count = root.children.len();
+            for (i, &child_index) in root.children.iter().enumerate() {
+                let is_last = i == child_count - 1;
+                Self::flatten_node(tree, child_index, &mut rows, "", is_last, false);
+            }
+        }
+
+        rows
+    }
+
+    /// Recursively flatten a single node and its visible children
+    fn flatten_node(
+        tree: &JsonTree,
+        index: usize,
+        rows: &mut Vec<FlatRow>,
+        prefix: &str,
+        is_last: bool,
+        is_root: bool,
+    ) {
+        let Some(node) = tree.get_node(index) else {
+            return;
+        };
+
+        // Build prefix (same logic as collect_nodes)
+        let (current_prefix, child_prefix) = if is_root {
+            (String::new(), String::new())
+        } else if node.depth == 1 {
+            let connector = if is_last { "└─ " } else { "├─ " };
+            let child = if is_last { "   ".to_string() } else { "│  ".to_string() };
+            (connector.to_string(), child)
+        } else {
+            let connector = if is_last { "└─ " } else { "├─ " };
+            let current = format!("{}{}", prefix, connector);
+            let child = if is_last {
+                format!("{}   ", prefix)
+            } else {
+                format!("{}│  ", prefix)
+            };
+            (current, child)
+        };
+
+        // Format value (same logic as collect_nodes)
+        let (value_display, value_color) = match &node.value {
+            JsonValue::Null => ("null".to_string(), COLOR_NULL),
+            JsonValue::Bool(b) => (b.to_string(), COLOR_BOOL),
+            JsonValue::Number(n) => (n.to_string(), COLOR_NUMBER),
+            JsonValue::String(s) => (format!("\"{}\"", s), COLOR_STRING),
+            JsonValue::Array => {
+                if node.expanded {
+                    (":".to_string(), COLOR_BRACKET)
+                } else {
+                    ("[...]".to_string(), COLOR_KEY)
+                }
+            }
+            JsonValue::Object => {
+                if node.expanded {
+                    (":".to_string(), COLOR_BRACKET)
+                } else {
+                    ("{...}".to_string(), COLOR_KEY)
+                }
+            }
+        };
+
+        // Get current row index before pushing
+        let row_index = rows.len();
+
+        // Create the FlatRow
+        rows.push(FlatRow {
+            node_index: index,
+            prefix: current_prefix,
+            key: node.key.as_ref().map(|k| k.to_string()),
+            value_display,
+            value_color,
+            is_expandable: node.is_expandable(),
+            is_expanded: node.expanded,
+            row_index,
+        });
+
+        // Recurse into children if expanded
+        if node.expanded {
+            let child_count = node.children.len();
+            for (i, &child_index) in node.children.iter().enumerate() {
+                let is_last_child = i == child_count - 1;
+                Self::flatten_node(tree, child_index, rows, &child_prefix, is_last_child, false);
+            }
+        }
+    }
+
+    /// Render a single FlatRow into an Element
+    fn render_flat_row<'a>(&self, flat_row: &FlatRow) -> Element<'a, Message> {
+        // Build the row element
+        let node_row: Element<'a, Message> = if flat_row.is_expandable {
+            // Expandable node - make it clickable
+            let indicator = if flat_row.is_expanded { "⊟" } else { "⊞" };
+
+            let mut row_elements: Vec<Element<'a, Message>> = vec![
+                text(flat_row.prefix.clone()).font(Font::MONOSPACE).size(13).color(COLOR_BRACKET).into(),
+                text(indicator).font(Font::MONOSPACE).size(13).color(COLOR_INDICATOR).into(),
+                text(" ").font(Font::MONOSPACE).size(13).into(),
+            ];
+
+            // Show key if it exists (empty keys shown as "" for visibility)
+            if let Some(k) = &flat_row.key {
+                let display_key = if k.is_empty() { "\"\"".to_string() } else { k.clone() };
+                row_elements.push(
+                    text(display_key)
+                        .font(Font::MONOSPACE)
+                        .size(13)
+                        .color(COLOR_KEY)
+                        .into()
+                );
+                row_elements.push(
+                    text(": ")
+                        .font(Font::MONOSPACE)
+                        .size(13)
+                        .color(COLOR_BRACKET)
+                        .into()
+                );
+            }
+
+            // Show value preview for collapsed containers ({...} or [...])
+            if !flat_row.is_expanded {
+                row_elements.push(
+                    text(flat_row.value_display.clone())
+                        .font(Font::MONOSPACE)
+                        .size(13)
+                        .color(flat_row.value_color)
+                        .into()
+                );
+            }
+
+            button(row(row_elements).spacing(0))
+                .on_press(Message::ToggleNode(flat_row.node_index))
+                .padding(0)
+                .style(button::text)
+                .into()
+        } else {
+            // Leaf node - not clickable
+            let mut row_elements: Vec<Element<'a, Message>> = vec![
+                text(flat_row.prefix.clone()).font(Font::MONOSPACE).size(13).color(COLOR_BRACKET).into(),
+                text("  ").font(Font::MONOSPACE).size(13).into(),
+            ];
+
+            // Show key if it exists (empty keys shown as "" for visibility)
+            if let Some(k) = &flat_row.key {
+                let display_key = if k.is_empty() { "\"\"".to_string() } else { k.clone() };
+                row_elements.push(
+                    text(display_key)
+                        .font(Font::MONOSPACE)
+                        .size(13)
+                        .color(COLOR_KEY)
+                        .into()
+                );
+                row_elements.push(
+                    text(": ")
+                        .font(Font::MONOSPACE)
+                        .size(13)
+                        .color(COLOR_BRACKET)
+                        .into()
+                );
+            }
+
+            row_elements.push(
+                text(flat_row.value_display.clone())
+                    .font(Font::MONOSPACE)
+                    .size(13)
+                    .color(flat_row.value_color)
+                    .into()
+            );
+
+            row(row_elements).spacing(0).into()
+        };
+
+        // Wrap in container with zebra striping
+        // Use large min-width so zebra extends beyond viewport for horizontal scroll
+        let row_container = if flat_row.row_index % 2 == 1 {
+            container(node_row)
+                .width(Length::Fixed(5000.0))  // Wide enough for most content
+                .height(Length::Fixed(ROW_HEIGHT))
+                .style(|_theme| container::Style {
+                    background: Some(COLOR_ROW_ODD.into()),
+                    ..Default::default()
+                })
+        } else {
+            container(node_row)
+                .width(Length::Fixed(5000.0))  // Wide enough for most content
+                .height(Length::Fixed(ROW_HEIGHT))
+        };
+
+        row_container.into()
     }
 
     // Calculate the maximum display width needed for the tree
@@ -177,6 +415,9 @@ impl App {
                                         self.current_file = Some(path);
                                         self.load_time = Some(elapsed);
 
+                                        // Rebuild flat_rows for virtual scrolling
+                                        self.flat_rows = Self::flatten_visible_nodes(self.tree.as_ref().unwrap());
+
                                         // Auto-resize window to fit content
                                         let new_width = self.calculate_max_width();
                                         return window::latest()
@@ -208,8 +449,16 @@ impl App {
             Message::ToggleNode(index) => {
                 if let Some(tree) = &mut self.tree {
                     tree.toggle_expanded(index);
+                    // Rebuild flat_rows after toggle
+                    self.flat_rows = Self::flatten_visible_nodes(tree);
                 }
                 Task::none()  // No async work needed
+            }
+            Message::Scrolled(viewport) => {
+                // Update scroll offset and viewport height for virtual scrolling
+                self.scroll_offset = viewport.absolute_offset().y;
+                self.viewport_height = viewport.bounds().height;
+                Task::none()
             }
         }
     }
@@ -218,29 +467,51 @@ impl App {
     fn view(&self) -> Element<'_, Message> {
         // Tree display section
         let tree_view: Element<'_, Message> = match &self.tree {
-            Some(tree) => {
-                // Build interactive tree view
-                let mut elements: Vec<Element<'_, Message>> = Vec::new();
-                let mut row_index: usize = 0;
+            Some(_tree) => {
+                // ===== VIRTUAL SCROLLING =====
+                // Calculate which rows are visible based on scroll position
+                let total_rows = self.flat_rows.len();
 
-                // Skip the root node, directly render its children (like Dadroit)
-                if let Some(root) = tree.get_node(tree.root_index()) {
-                    let child_count = root.children.len();
-                    for (i, &child_index) in root.children.iter().enumerate() {
-                        let is_last = i == child_count - 1;
-                        self.collect_nodes(tree, child_index, &mut elements, "", is_last, false, &mut row_index);
-                    }
+                // Calculate visible range (with buffer for smooth scrolling)
+                let first_visible = (self.scroll_offset / ROW_HEIGHT).floor() as usize;
+                let visible_count = (self.viewport_height / ROW_HEIGHT).ceil() as usize + 1;
+
+                // Add buffer rows above and below for smoother scrolling
+                let start = first_visible.saturating_sub(BUFFER_ROWS);
+                let end = (first_visible + visible_count + BUFFER_ROWS).min(total_rows);
+
+                // Build only the visible rows
+                let mut elements: Vec<Element<'_, Message>> = Vec::new();
+
+                // Add top spacer to position content correctly
+                let top_offset = start as f32 * ROW_HEIGHT;
+                if top_offset > 0.0 {
+                    elements.push(Space::new().height(Length::Fixed(top_offset)).into());
+                }
+
+                // Render only the visible rows
+                for flat_row in self.flat_rows.iter().skip(start).take(end - start) {
+                    elements.push(self.render_flat_row(flat_row));
+                }
+
+                // Add bottom spacer to maintain scroll bar size
+                let bottom_offset = (total_rows - end) as f32 * ROW_HEIGHT;
+                if bottom_offset > 0.0 {
+                    elements.push(Space::new().height(Length::Fixed(bottom_offset)).into());
                 }
 
                 let nodes_column = column(elements)
-                    .spacing(0)
-                    .width(Fill);
+                    .spacing(0);
 
                 scrollable(
                     container(nodes_column)
-                        .width(Fill)
-                        .padding([10, 0])  // Only vertical padding, zebra extends to edges
+                        .padding([10, 0])
                 )
+                .direction(scrollable::Direction::Both {
+                    vertical: scrollable::Scrollbar::default(),
+                    horizontal: scrollable::Scrollbar::default(),
+                })
+                .on_scroll(Message::Scrolled)  // Track scroll position
                 .height(Length::Fill)
                 .width(Fill)
                 .into()
@@ -300,174 +571,6 @@ impl App {
             column![tree_view, status_bar].into()
         } else {
             tree_view  // This is the welcome screen
-        }
-    }
-
-    // Recursively collect tree nodes into a Vec
-    // `prefix` contains the tree lines for ancestor levels (│ or space)
-    // `is_last` indicates if this node is the last child of its parent
-    // `is_root` indicates if this is the root node (no prefix needed)
-    // `row_index` tracks row number for alternating backgrounds
-    fn collect_nodes<'a>(
-        &self,
-        tree: &JsonTree,
-        index: usize,
-        elements: &mut Vec<Element<'a, Message>>,
-        prefix: &str,
-        is_last: bool,
-        is_root: bool,
-        row_index: &mut usize,
-    ) {
-        let Some(node) = tree.get_node(index) else {
-            return;
-        };
-
-        // Build the tree line prefix for this node
-        // The prefix shows vertical lines (│) for ancestor levels that have more siblings
-        // Using "├─ " and "│  " pattern like Dadroit (3 chars per level)
-        let (current_prefix, child_prefix) = if is_root {
-            // Root node has no prefix
-            (String::new(), String::new())
-        } else if node.depth == 1 {
-            // First level - connector with dash
-            let connector = if is_last { "└─ " } else { "├─ " };
-            // Children: vertical line + 2 spaces, or 3 spaces
-            let child = if is_last { "   ".to_string() } else { "│  ".to_string() };
-            (connector.to_string(), child)
-        } else {
-            // Deeper levels: connectors with proper vertical lines
-            let connector = if is_last { "└─ " } else { "├─ " };
-            let current = format!("{}{}", prefix, connector);
-
-            // Children: vertical line + 2 spaces, or 3 spaces
-            let child = if is_last {
-                format!("{}   ", prefix)  // 3 spaces
-            } else {
-                format!("{}│  ", prefix)  // vertical + 2 spaces
-            };
-
-            (current, child)
-        };
-
-        // Format the value part with appropriate color
-        // Collapsed containers show {...} or [...], expanded just show :
-        let (value_str, value_color) = match &node.value {
-            JsonValue::Null => ("null".to_string(), COLOR_NULL),
-            JsonValue::Bool(b) => (b.to_string(), COLOR_BOOL),
-            JsonValue::Number(n) => (n.to_string(), COLOR_NUMBER),
-            JsonValue::String(s) => (format!("\"{}\"", s), COLOR_STRING),
-            JsonValue::Array => {
-                if node.expanded {
-                    (":".to_string(), COLOR_BRACKET)
-                } else {
-                    ("[...]".to_string(), COLOR_KEY)  // Collapsed array preview
-                }
-            }
-            JsonValue::Object => {
-                if node.expanded {
-                    (":".to_string(), COLOR_BRACKET)
-                } else {
-                    ("{...}".to_string(), COLOR_KEY)  // Collapsed object preview
-                }
-            }
-        };
-
-        // Build the row for this node
-        let node_row: Element<'a, Message> = if node.is_expandable() {
-            // Expandable node - make it clickable
-            let indicator = if node.expanded { "⊟" } else { "⊞" };
-
-            // Build row with colored parts inside button
-            // Clone current_prefix to transfer ownership (avoids lifetime issues)
-            let mut row_elements: Vec<Element<'a, Message>> = vec![
-                text(current_prefix.clone()).font(Font::MONOSPACE).size(13).color(COLOR_BRACKET).into(),
-                text(indicator).font(Font::MONOSPACE).size(13).color(COLOR_INDICATOR).into(),
-                text(" ").font(Font::MONOSPACE).size(13).into(),  // Space after indicator
-            ];
-
-            // Add key if present (no quotes, cleaner look)
-            if let Some(k) = &node.key {
-                row_elements.push(
-                    text(k.clone())
-                        .font(Font::MONOSPACE)
-                        .size(13)
-                        .color(COLOR_KEY)
-                        .into()
-                );
-                row_elements.push(
-                    text(": ")
-                        .font(Font::MONOSPACE)
-                        .size(13)
-                        .color(COLOR_BRACKET)
-                        .into()
-                );
-            }
-
-            button(row(row_elements).spacing(0))
-                .on_press(Message::ToggleNode(index))
-                .padding(0)  // No padding to align with leaf nodes
-                .style(button::text)
-                .into()
-        } else {
-            // Leaf node - not clickable, but still styled
-            // Add same spacing as indicator "⊟ " (2 chars) to align with expandable nodes
-            let mut row_elements: Vec<Element<'a, Message>> = vec![
-                text(current_prefix).font(Font::MONOSPACE).size(13).color(COLOR_BRACKET).into(),
-                text("  ").font(Font::MONOSPACE).size(13).into(),  // 2 spaces to match "⊟ "
-            ];
-
-            // Add key if present (no quotes)
-            if let Some(k) = &node.key {
-                row_elements.push(
-                    text(k.clone())
-                        .font(Font::MONOSPACE)
-                        .size(13)
-                        .color(COLOR_KEY)
-                        .into()
-                );
-                row_elements.push(
-                    text(": ")
-                        .font(Font::MONOSPACE)
-                        .size(13)
-                        .color(COLOR_BRACKET)
-                        .into()
-                );
-            }
-
-            // Add value with its color
-            row_elements.push(
-                text(value_str)
-                    .font(Font::MONOSPACE)
-                    .size(13)
-                    .color(value_color)
-                    .into()
-            );
-
-            row(row_elements).spacing(0).into()
-        };
-
-        // Wrap all rows in containers with Fill width, odd rows get background
-        let row_container = if *row_index % 2 == 1 {
-            container(node_row)
-                .width(Fill)
-                .style(|_theme| container::Style {
-                    background: Some(COLOR_ROW_ODD.into()),
-                    ..Default::default()
-                })
-        } else {
-            container(node_row).width(Fill)
-        };
-        elements.push(row_container.into());
-        *row_index += 1;
-
-        // Collect children if expanded
-        if node.expanded {
-            let children = &node.children;
-            let child_count = children.len();
-            for (i, &child_index) in children.iter().enumerate() {
-                let is_last_child = i == child_count - 1;
-                self.collect_nodes(tree, child_index, elements, &child_prefix, is_last_child, false, row_index);
-            }
         }
     }
 }
