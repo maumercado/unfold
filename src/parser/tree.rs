@@ -37,6 +37,7 @@ impl JsonTree {
     }
 
     /// Get the root node
+    #[allow(dead_code)]
     pub fn root(&self) -> Option<&JsonNode> {
         self.get_node(self.root_index)
     }
@@ -47,6 +48,7 @@ impl JsonTree {
     }
 
     /// Get a mutable reference to a node
+    #[allow(dead_code)]
     pub fn get_node_mut(&mut self, index: usize) -> Option<&mut JsonNode> {
         self.nodes.get_mut(index)
     }
@@ -109,7 +111,8 @@ impl JsonTree {
         false
     }
 
-    /// Pretty print the tree structure
+    /// Pretty print the tree structure (for debugging)
+    #[allow(dead_code)]
     pub fn print_tree(&self) -> String {
         let mut output = String::new();
         if let Some(_root) = self.root() {
@@ -119,6 +122,7 @@ impl JsonTree {
     }
 
     /// Recursively print a node and its children
+    #[allow(dead_code)]
     fn print_node(&self, output: &mut String, index: usize, indent: usize) {
         let Some(node) = self.get_node(index) else {
             return;

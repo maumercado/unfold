@@ -90,19 +90,26 @@ pub fn main() -> iced::Result {
     iced::application(App::boot, App::update, App::view)
         .window_size((900.0, 700.0))  // Default window size
         .resizable(true)               // Allow window resizing
-        .title("Unfold - JSON Viewer")
+        .title(|app: &App| {
+            match &app.current_file {
+                Some(path) => {
+                    let filename = path.file_name()
+                        .map(|n| n.to_string_lossy().to_string())
+                        .unwrap_or_else(|| "unknown".to_string());
+                    format!("{} - Unfold", filename)
+                }
+                None => String::from("Unfold - JSON Viewer")
+            }
+        })
         .run()
 }
 
 // The application state (Model)
 struct App {
-    // The loaded JSON tree (None if no file loaded)
     tree: Option<JsonTree>,
-    // Status message to show the user
     status: String,
-    // Currently loaded file path
     current_file: Option<PathBuf>,
-    // Display preferences
+    #[allow(dead_code)]
     preferences: Preferences,
     // Time taken to load and parse the file
     load_time: Option<Duration>,
@@ -121,12 +128,11 @@ struct App {
     tree_scrollable_id: WidgetId,
 }
 
-// User-configurable display preferences
+// User-configurable display preferences (for future use)
+#[allow(dead_code)]
 #[derive(Debug, Clone)]
 struct Preferences {
-    // Number of spaces per indent level (2, 4, etc.)
     indent_size: usize,
-    // Show tree connector lines (├─, └─, │)
     show_tree_lines: bool,
 }
 
@@ -162,15 +168,13 @@ impl Default for App {
 // Messages that can be sent to update the app
 #[derive(Debug, Clone)]
 enum Message {
-    OpenFileDialog,                    // User clicked "Open File" button
-    FileSelected(Option<PathBuf>),     // File dialog returned (None if cancelled)
+    OpenFileDialog,
+    FileSelected(Option<PathBuf>),
     ToggleNode(usize),
-    Scrolled(Viewport),                // User scrolled the tree view
-    // Search messages
-    SearchQueryChanged(String),        // User typed in search box
-    SearchNext,                        // Go to next search result
-    SearchPrev,                        // Go to previous search result
-    ClearSearch,                       // Clear search
+    Scrolled(Viewport),
+    SearchQueryChanged(String),
+    SearchNext,
+    SearchPrev,
 }
 
 impl App {
@@ -210,15 +214,16 @@ impl App {
             return;
         };
 
-        // Build prefix (same logic as collect_nodes)
+        // Build prefix - ends at branch point (├ or └), not including the dash
+        // The dash or expand icon is added during rendering for proper alignment
         let (current_prefix, child_prefix) = if is_root {
             (String::new(), String::new())
         } else if node.depth == 1 {
-            let connector = if is_last { "└─ " } else { "├─ " };
+            let connector = if is_last { "└" } else { "├" };
             let child = if is_last { "   ".to_string() } else { "│  ".to_string() };
             (connector.to_string(), child)
         } else {
-            let connector = if is_last { "└─ " } else { "├─ " };
+            let connector = if is_last { "└" } else { "├" };
             let current = format!("{}{}", prefix, connector);
             let child = if is_last {
                 format!("{}   ", prefix)
@@ -280,12 +285,12 @@ impl App {
         // Build the row element
         let node_row: Element<'a, Message> = if flat_row.is_expandable {
             // Expandable node - make it clickable
-            let indicator = if flat_row.is_expanded { "⊟" } else { "⊞" };
+            // Icon replaces the "─" part of the connector for alignment
+            let indicator = if flat_row.is_expanded { "⊟ " } else { "⊞ " };
 
             let mut row_elements: Vec<Element<'a, Message>> = vec![
                 text(flat_row.prefix.clone()).font(Font::MONOSPACE).size(13).color(COLOR_BRACKET).into(),
                 text(indicator).font(Font::MONOSPACE).size(13).color(COLOR_INDICATOR).into(),
-                text(" ").font(Font::MONOSPACE).size(13).into(),
             ];
 
             // Show key if it exists (empty keys shown as "" for visibility)
@@ -325,9 +330,10 @@ impl App {
                 .into()
         } else {
             // Leaf node - not clickable
+            // Add "─ " to complete the connector (same width as icon + space)
             let mut row_elements: Vec<Element<'a, Message>> = vec![
                 text(flat_row.prefix.clone()).font(Font::MONOSPACE).size(13).color(COLOR_BRACKET).into(),
-                text("  ").font(Font::MONOSPACE).size(13).into(),
+                text("─ ").font(Font::MONOSPACE).size(13).color(COLOR_BRACKET).into(),
             ];
 
             // Show key if it exists (empty keys shown as "" for visibility)
@@ -494,7 +500,7 @@ impl App {
                                         // Rebuild flat_rows for virtual scrolling
                                         self.flat_rows = Self::flatten_visible_nodes(self.tree.as_ref().unwrap());
 
-                                        // Auto-resize window to fit content
+                                        // Auto-resize window (title updates via title closure)
                                         let new_width = self.calculate_max_width();
                                         return window::latest()
                                             .and_then(move |window_id| {
@@ -620,13 +626,6 @@ impl App {
                 } else {
                     Task::none()
                 }
-            }
-            Message::ClearSearch => {
-                self.search_query.clear();
-                self.search_results.clear();
-                self.search_result_index = None;
-                self.search_matches.clear();
-                Task::none()
             }
         }
     }
