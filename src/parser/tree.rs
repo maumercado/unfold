@@ -60,9 +60,53 @@ impl JsonTree {
         }
     }
 
+    /// Set the expanded state of a node explicitly
+    pub fn set_expanded(&mut self, index: usize, expanded: bool) {
+        if let Some(node) = self.nodes.get_mut(index) {
+            if node.is_expandable() {
+                node.expanded = expanded;
+            }
+        }
+    }
+
     /// Get the root index
     pub fn root_index(&self) -> usize {
         self.root_index
+    }
+
+    /// Get the path from root to a given node (list of indices from root to target)
+    /// Used for auto-expanding the tree to show a search result
+    pub fn get_path_to_node(&self, target_index: usize) -> Vec<usize> {
+        let mut path = Vec::new();
+
+        // Use a recursive search starting from root
+        if self.find_path_recursive(self.root_index, target_index, &mut path) {
+            path
+        } else {
+            // Target not found, return empty path
+            Vec::new()
+        }
+    }
+
+    /// Helper: recursively search for target and build path
+    fn find_path_recursive(&self, current: usize, target: usize, path: &mut Vec<usize>) -> bool {
+        path.push(current);
+
+        if current == target {
+            return true;
+        }
+
+        if let Some(node) = self.get_node(current) {
+            for &child in &node.children {
+                if self.find_path_recursive(child, target, path) {
+                    return true;
+                }
+            }
+        }
+
+        // Not found in this branch, remove from path
+        path.pop();
+        false
     }
 
     /// Pretty print the tree structure
@@ -196,16 +240,16 @@ mod tests {
 
         let root_idx = tree.root_index();
 
-        // Should start expanded
-        assert!(tree.get_node(root_idx).unwrap().expanded);
-
-        // Toggle to collapse
-        tree.toggle_expanded(root_idx);
+        // Should start collapsed (for performance with large files)
         assert!(!tree.get_node(root_idx).unwrap().expanded);
 
-        // Toggle to expand again
+        // Toggle to expand
         tree.toggle_expanded(root_idx);
         assert!(tree.get_node(root_idx).unwrap().expanded);
+
+        // Toggle to collapse again
+        tree.toggle_expanded(root_idx);
+        assert!(!tree.get_node(root_idx).unwrap().expanded);
     }
 
     #[test]
@@ -218,7 +262,12 @@ mod tests {
             "version": "0.1.0"
         });
 
-        let tree = build_tree(&value);
+        let mut tree = build_tree(&value);
+
+        // Expand root to see children (nodes start collapsed)
+        let root_idx = tree.root_index();
+        tree.set_expanded(root_idx, true);
+
         let output = tree.print_tree();
 
         println!("{}", output);  // Will show when running with --nocapture
