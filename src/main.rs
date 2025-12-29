@@ -100,6 +100,8 @@ use parser::{JsonTree, JsonValue};
 use std::fs;
 use std::path::PathBuf;
 use std::time::{Duration, Instant};
+use std::env;
+use std::process::Command;
 
 /// A flattened row ready for rendering
 /// This pre-computes everything needed to render a single tree row
@@ -237,12 +239,34 @@ enum Message {
     FocusSearch,
     // Search submit from text input (checks current_modifiers for Shift)
     SearchSubmit,
+    // Open file dialog, then open selected file in new window
+    OpenFileInNewWindow,
+    // File was selected for opening in new window
+    FileSelectedForNewWindow(Option<PathBuf>),
 }
 
 impl App {
     // Initialize the application (called once at startup)
+    // Checks for CLI arguments: `unfold myfile.json`
     fn boot() -> (Self, Task<Message>) {
-        (App::default(), Task::none())
+        let app = App::default();
+
+        // Check if a file path was passed as CLI argument
+        // std::env::args() returns an iterator over command-line arguments
+        // First argument is the program name, second would be the file path
+        let args: Vec<String> = env::args().collect();
+
+        if args.len() > 1 {
+            // User passed a file path - load it automatically
+            let file_path = PathBuf::from(&args[1]);
+
+            // Return a Task that sends FileSelected message
+            // Task::done() creates an immediate task with the given message
+            (app, Task::done(Message::FileSelected(Some(file_path))))
+        } else {
+            // No file argument - show welcome screen
+            (app, Task::none())
+        }
     }
 
     // Subscription: Listen for keyboard events
@@ -761,9 +785,46 @@ impl App {
                     Key::Character(c) if c.as_str() == "f" && cmd_or_ctrl => {
                         self.update(Message::FocusSearch)
                     }
+                    // Cmd/Ctrl+N: New window (opens file dialog, then opens in new window)
+                    Key::Character(c) if c.as_str() == "n" && cmd_or_ctrl => {
+                        self.update(Message::OpenFileInNewWindow)
+                    }
                     _ => Task::none()
                 }
             }
+            Message::OpenFileInNewWindow => {
+                // Open file dialog, then spawn new window with selected file
+                Task::perform(
+                    async {
+                        let file = rfd::AsyncFileDialog::new()
+                            .add_filter("JSON", &["json"])
+                            .add_filter("All Files", &["*"])
+                            .set_title("Open JSON File in New Window")
+                            .pick_file()
+                            .await;
+                        file.map(|f| f.path().to_path_buf())
+                    },
+                    Message::FileSelectedForNewWindow,
+                )
+            }
+            Message::FileSelectedForNewWindow(path_option) => {
+                // File was selected - spawn new window with it
+                if let Some(file_path) = path_option {
+                    Self::spawn_new_window(Some(file_path));
+                }
+                Task::none()
+            }
+        }
+    }
+
+    /// Spawn a new instance of the application, optionally with a file
+    fn spawn_new_window(file_path: Option<PathBuf>) {
+        if let Ok(exe_path) = env::current_exe() {
+            let mut cmd = Command::new(exe_path);
+            if let Some(path) = file_path {
+                cmd.arg(path);
+            }
+            let _ = cmd.spawn();
         }
     }
 
@@ -974,11 +1035,17 @@ impl App {
                     .padding([8, 16])
                     .style(button_3d_style);
 
+                let open_new_window_button = button(text("Open in New Window...").size(12))
+                    .on_press(Message::OpenFileInNewWindow)
+                    .padding([6, 12])
+                    .style(button_3d_style);
+
                 let welcome = column![
                     header,
                     open_button,
+                    open_new_window_button,
                 ]
-                .spacing(20)
+                .spacing(15)
                 .align_x(Center);
 
                 container(welcome)
