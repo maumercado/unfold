@@ -7,6 +7,7 @@ use iced::border::Radius;
 use iced::advanced::widget::{Id as WidgetId, operate};
 use iced::advanced::widget::operation::scrollable::{scroll_to, AbsoluteOffset};
 use std::collections::HashSet;
+use regex::Regex;
 
 // Color scheme for syntax highlighting
 const COLOR_KEY: Color = Color::from_rgb(0.4, 0.7, 0.9);       // Light blue for keys
@@ -56,6 +57,40 @@ fn button_3d_style(_theme: &iced::Theme, status: ButtonStatus) -> button::Style 
             blur_radius: 3.0,
         },
         snap: true,
+    }
+}
+
+/// Toggle button style - highlighted when active
+fn button_toggle_style(is_active: bool) -> impl Fn(&iced::Theme, ButtonStatus) -> button::Style {
+    move |_theme: &iced::Theme, status: ButtonStatus| {
+        let active_bg = Color::from_rgb(0.3, 0.5, 0.7);      // Blue when active
+        let active_border = Color::from_rgb(0.4, 0.6, 0.8);
+
+        let (bg_color, text_color, border_color) = match (is_active, status) {
+            (true, ButtonStatus::Active) => (active_bg, Color::WHITE, active_border),
+            (true, ButtonStatus::Hovered) => (Color::from_rgb(0.35, 0.55, 0.75), Color::WHITE, active_border),
+            (true, ButtonStatus::Pressed) => (Color::from_rgb(0.25, 0.45, 0.65), Color::WHITE, active_border),
+            (false, ButtonStatus::Active) => (COLOR_BTN_BG, Color::from_rgb(0.7, 0.7, 0.7), COLOR_BTN_BORDER_TOP),
+            (false, ButtonStatus::Hovered) => (COLOR_BTN_BG_HOVER, Color::from_rgb(0.9, 0.9, 0.9), COLOR_BTN_BORDER_TOP),
+            (false, ButtonStatus::Pressed) => (COLOR_BTN_BORDER_BOTTOM, Color::from_rgb(0.8, 0.8, 0.8), COLOR_BTN_BORDER_BOTTOM),
+            (_, ButtonStatus::Disabled) => (COLOR_BTN_DISABLED, Color::from_rgb(0.5, 0.5, 0.5), COLOR_BTN_DISABLED),
+        };
+
+        button::Style {
+            background: Some(bg_color.into()),
+            text_color,
+            border: Border {
+                color: border_color,
+                width: 1.0,
+                radius: Radius::from(4.0),
+            },
+            shadow: Shadow {
+                color: Color::from_rgba(0.0, 0.0, 0.0, 0.3),
+                offset: iced::Vector::new(0.0, 1.0),
+                blur_radius: 2.0,
+            },
+            snap: true,
+        }
     }
 }
 
@@ -121,9 +156,12 @@ struct App {
     scroll_offset: f32,
     // Search state
     search_query: String,
-    search_results: Vec<usize>,        // Node indices that match the search
-    search_result_index: Option<usize>, // Current result (0-based index into search_results)
-    search_matches: HashSet<usize>,    // Set of matching node indices for O(1) lookup during render
+    search_results: Vec<usize>,
+    search_result_index: Option<usize>,
+    search_matches: HashSet<usize>,
+    search_case_sensitive: bool,
+    search_use_regex: bool,
+    search_regex_error: Option<String>,
     // Scrollable ID for programmatic scrolling
     tree_scrollable_id: WidgetId,
 }
@@ -154,12 +192,15 @@ impl Default for App {
             preferences: Preferences::default(),
             load_time: None,
             flat_rows: Vec::new(),
-            viewport_height: 600.0,  // Default, will be updated
+            viewport_height: 600.0,
             scroll_offset: 0.0,
             search_query: String::new(),
             search_results: Vec::new(),
             search_result_index: None,
             search_matches: HashSet::new(),
+            search_case_sensitive: false,
+            search_use_regex: false,
+            search_regex_error: None,
             tree_scrollable_id: WidgetId::unique(),
         }
     }
@@ -175,6 +216,8 @@ enum Message {
     SearchQueryChanged(String),
     SearchNext,
     SearchPrev,
+    ToggleCaseSensitive,
+    ToggleRegex,
 }
 
 impl App {
@@ -543,37 +586,16 @@ impl App {
                 Task::none()
             }
             Message::SearchQueryChanged(query) => {
-                self.search_query = query.clone();
-
-                // Perform search if query is not empty
-                if query.is_empty() {
-                    self.search_results.clear();
-                    self.search_result_index = None;
-                    self.search_matches.clear();
-                    Task::none()
-                } else if let Some(tree) = &self.tree {
-                    // Search all nodes for matches
-                    self.search_results = Self::search_nodes(tree, &query);
-                    self.search_matches = self.search_results.iter().cloned().collect();
-
-                    // Set to first result if any found
-                    if !self.search_results.is_empty() {
-                        self.search_result_index = Some(0);
-                        let target = self.search_results[0];
-                        // Expand path to first result
-                        self.expand_to_node(target);
-                        // Rebuild flat_rows BEFORE scrolling (so we can find the row)
-                        self.flat_rows = Self::flatten_visible_nodes(self.tree.as_ref().unwrap());
-                        // Return scroll task
-                        self.scroll_to_node(target)
-                    } else {
-                        self.search_result_index = None;
-                        self.flat_rows = Self::flatten_visible_nodes(tree);
-                        Task::none()
-                    }
-                } else {
-                    Task::none()
-                }
+                self.search_query = query;
+                self.run_search()
+            }
+            Message::ToggleCaseSensitive => {
+                self.search_case_sensitive = !self.search_case_sensitive;
+                self.run_search()
+            }
+            Message::ToggleRegex => {
+                self.search_use_regex = !self.search_use_regex;
+                self.run_search()
             }
             Message::SearchNext => {
                 if !self.search_results.is_empty() {
@@ -630,17 +652,52 @@ impl App {
         }
     }
 
-    /// Search all nodes in the tree for matches (case-insensitive)
-    fn search_nodes(tree: &JsonTree, query: &str) -> Vec<usize> {
-        let query_lower = query.to_lowercase();
+    /// Search all nodes in the tree for matches
+    /// Returns (results, error_message) where error_message is Some if regex is invalid
+    fn search_nodes(
+        tree: &JsonTree,
+        query: &str,
+        case_sensitive: bool,
+        use_regex: bool,
+    ) -> (Vec<usize>, Option<String>) {
+        if query.is_empty() {
+            return (Vec::new(), None);
+        }
+
+        // Build the matcher based on options
+        let regex = if use_regex {
+            let pattern = if case_sensitive {
+                query.to_string()
+            } else {
+                format!("(?i){}", query)
+            };
+            match Regex::new(&pattern) {
+                Ok(r) => Some(r),
+                Err(e) => return (Vec::new(), Some(format!("Invalid regex: {}", e))),
+            }
+        } else {
+            None
+        };
+
         let mut results = Vec::new();
+
+        // Helper closure for matching
+        let matches = |text: &str| -> bool {
+            if let Some(ref re) = regex {
+                re.is_match(text)
+            } else if case_sensitive {
+                text.contains(query)
+            } else {
+                text.to_lowercase().contains(&query.to_lowercase())
+            }
+        };
 
         // Iterate through all nodes
         for i in 0..tree.node_count() {
             if let Some(node) = tree.get_node(i) {
                 // Check key
                 if let Some(key) = &node.key {
-                    if key.to_lowercase().contains(&query_lower) {
+                    if matches(key) {
                         results.push(i);
                         continue;
                     }
@@ -648,10 +705,10 @@ impl App {
 
                 // Check value
                 let value_matches = match &node.value {
-                    JsonValue::String(s) => s.to_lowercase().contains(&query_lower),
-                    JsonValue::Number(n) => n.to_string().contains(&query_lower),
-                    JsonValue::Bool(b) => b.to_string().contains(&query_lower),
-                    JsonValue::Null => "null".contains(&query_lower),
+                    JsonValue::String(s) => matches(s),
+                    JsonValue::Number(n) => matches(&n.to_string()),
+                    JsonValue::Bool(b) => matches(&b.to_string()),
+                    JsonValue::Null => matches("null"),
                     _ => false,
                 };
 
@@ -661,7 +718,44 @@ impl App {
             }
         }
 
-        results
+        (results, None)
+    }
+
+    /// Run search with current query and options, update results
+    fn run_search(&mut self) -> Task<Message> {
+        if self.search_query.is_empty() {
+            self.search_results.clear();
+            self.search_result_index = None;
+            self.search_matches.clear();
+            self.search_regex_error = None;
+            return Task::none();
+        }
+
+        if let Some(tree) = &self.tree {
+            let (results, error) = Self::search_nodes(
+                tree,
+                &self.search_query,
+                self.search_case_sensitive,
+                self.search_use_regex,
+            );
+
+            self.search_regex_error = error;
+            self.search_results = results;
+            self.search_matches = self.search_results.iter().cloned().collect();
+
+            if !self.search_results.is_empty() {
+                self.search_result_index = Some(0);
+                let target = self.search_results[0];
+                self.expand_to_node(target);
+                self.flat_rows = Self::flatten_visible_nodes(self.tree.as_ref().unwrap());
+                return self.scroll_to_node(target);
+            } else {
+                self.search_result_index = None;
+                self.flat_rows = Self::flatten_visible_nodes(tree);
+            }
+        }
+
+        Task::none()
     }
 
     /// Expand all ancestors of a node to make it visible
@@ -782,13 +876,27 @@ impl App {
 
         // When file is loaded, show toolbar + tree + status bar
         if self.tree.is_some() {
-            // Search toolbar
-            let search_input = text_input("Search...", &self.search_query)
+            // Search option toggle buttons (Dadroit style)
+            let case_button = button(text("Aa").size(11))
+                .padding([4, 8])
+                .style(button_toggle_style(self.search_case_sensitive))
+                .on_press(Message::ToggleCaseSensitive);
+
+            let regex_button = button(text(".*").size(11))
+                .padding([4, 8])
+                .style(button_toggle_style(self.search_use_regex))
+                .on_press(Message::ToggleRegex);
+
+            // Search input
+            let search_input = text_input("Find...", &self.search_query)
                 .on_input(Message::SearchQueryChanged)
                 .padding(5)
-                .width(Length::Fixed(250.0));
+                .width(Length::Fixed(200.0));
 
-            let search_result_text = if self.search_results.is_empty() {
+            // Search result text (show error if regex is invalid)
+            let search_result_text = if let Some(ref error) = self.search_regex_error {
+                error.clone()
+            } else if self.search_results.is_empty() {
                 if self.search_query.is_empty() {
                     String::new()
                 } else {
@@ -829,13 +937,17 @@ impl App {
 
             let toolbar = container(
                 row![
+                    case_button,
+                    Space::new().width(Length::Fixed(3.0)),
+                    regex_button,
+                    Space::new().width(Length::Fixed(8.0)),
                     search_input,
-                    Space::new().width(Length::Fixed(15.0)),
+                    Space::new().width(Length::Fixed(10.0)),
                     prev_button,
                     Space::new().width(Length::Fixed(5.0)),
                     next_button,
-                    Space::new().width(Length::Fixed(15.0)),
-                    text(search_result_text).size(12).color(COLOR_BRACKET),
+                    Space::new().width(Length::Fixed(10.0)),
+                    text(search_result_text).size(11).color(COLOR_BRACKET),
                 ]
                 .align_y(Center)
             )
