@@ -2,10 +2,12 @@ mod parser;
 
 use iced::widget::{button, column, container, row, scrollable, text, text_input, Space};
 use iced::widget::scrollable::Viewport;
-use iced::{Element, Font, Length, Center, Fill, Color, Size, Task, window, Border, Shadow};
+use iced::{Element, Font, Length, Center, Fill, Color, Size, Task, window, Border, Shadow, Subscription};
 use iced::border::Radius;
 use iced::advanced::widget::{Id as WidgetId, operate};
 use iced::advanced::widget::operation::scrollable::{scroll_to, AbsoluteOffset};
+use iced::advanced::widget::operation::focusable;
+use iced::keyboard::{self, Key, Modifiers, key::Named};
 use std::collections::HashSet;
 use regex::Regex;
 
@@ -123,8 +125,8 @@ struct FlatRow {
 
 pub fn main() -> iced::Result {
     iced::application(App::boot, App::update, App::view)
-        .window_size((900.0, 700.0))  // Default window size
-        .resizable(true)               // Allow window resizing
+        .window_size((900.0, 700.0))
+        .resizable(true)
         .title(|app: &App| {
             match &app.current_file {
                 Some(path) => {
@@ -136,6 +138,8 @@ pub fn main() -> iced::Result {
                 None => String::from("Unfold - JSON Viewer")
             }
         })
+        // Subscriptions let us listen for external events like keyboard input
+        .subscription(App::subscription)
         .run()
 }
 
@@ -164,6 +168,10 @@ struct App {
     search_regex_error: Option<String>,
     // Scrollable ID for programmatic scrolling
     tree_scrollable_id: WidgetId,
+    // Search input ID for programmatic focus
+    search_input_id: WidgetId,
+    // Track current keyboard modifiers (for Shift+Enter in search input)
+    current_modifiers: Modifiers,
 }
 
 // User-configurable display preferences (for future use)
@@ -202,11 +210,15 @@ impl Default for App {
             search_use_regex: false,
             search_regex_error: None,
             tree_scrollable_id: WidgetId::unique(),
+            search_input_id: WidgetId::unique(),
+            current_modifiers: Modifiers::default(),
         }
     }
 }
 
 // Messages that can be sent to update the app
+// In Rust, enums can carry data - this is called "algebraic data types"
+// Each variant can have different associated data
 #[derive(Debug, Clone)]
 enum Message {
     OpenFileDialog,
@@ -218,12 +230,47 @@ enum Message {
     SearchPrev,
     ToggleCaseSensitive,
     ToggleRegex,
+    // Keyboard events - Key and Modifiers tell us what was pressed
+    KeyPressed(Key, Modifiers),
+    ModifiersChanged(Modifiers),
+    ClearSearch,
+    FocusSearch,
+    // Search submit from text input (checks current_modifiers for Shift)
+    SearchSubmit,
 }
 
 impl App {
     // Initialize the application (called once at startup)
     fn boot() -> (Self, Task<Message>) {
         (App::default(), Task::none())
+    }
+
+    // Subscription: Listen for keyboard events
+    // This is called continuously - Iced manages the event loop
+    //
+    // Key Rust concept: `keyboard::listen()` returns a Subscription<keyboard::Event>
+    // We use `.filter_map()` to only emit messages for events we care about.
+    // filter_map combines filter (skip some) and map (transform) in one step:
+    // - Return Some(value) to include the transformed value
+    // - Return None to skip the event entirely
+    fn subscription(&self) -> Subscription<Message> {
+        // keyboard::listen() subscribes to all keyboard events that aren't
+        // consumed by widgets (like text input). We handle KeyPressed and
+        // ModifiersChanged (to track Shift state for search input).
+        keyboard::listen().filter_map(|event| {
+            match event {
+                keyboard::Event::KeyPressed { key, modifiers, .. } => {
+                    // Handle key presses
+                    Some(Message::KeyPressed(key, modifiers))
+                }
+                keyboard::Event::ModifiersChanged(modifiers) => {
+                    // Track modifier state (for Shift+Enter in search input)
+                    Some(Message::ModifiersChanged(modifiers))
+                }
+                // Ignore key releases
+                _ => None
+            }
+        })
     }
 
     /// Flatten the tree into a Vec<FlatRow> for virtual scrolling
@@ -649,6 +696,74 @@ impl App {
                     Task::none()
                 }
             }
+            Message::ClearSearch => {
+                // Clear search state
+                self.search_query.clear();
+                self.search_results.clear();
+                self.search_result_index = None;
+                self.search_matches.clear();
+                self.search_regex_error = None;
+                Task::none()
+            }
+            Message::FocusSearch => {
+                // Focus the search input using a widget operation
+                // operate() takes an Operation and returns a Task that executes it
+                operate(focusable::focus(self.search_input_id.clone()))
+            }
+            Message::ModifiersChanged(modifiers) => {
+                // Track modifier state so we can check Shift when search submits
+                self.current_modifiers = modifiers;
+                Task::none()
+            }
+            Message::SearchSubmit => {
+                // Called when Enter is pressed in search input
+                // Check if Shift is held to determine direction
+                if self.current_modifiers.shift() {
+                    self.update(Message::SearchPrev)
+                } else {
+                    self.update(Message::SearchNext)
+                }
+            }
+            Message::KeyPressed(key, modifiers) => {
+                // Handle keyboard shortcuts
+                // Key Rust concept: Pattern matching on enums with associated data
+                // We match on the key type and check modifiers
+
+                // Check for Cmd on macOS, Ctrl on other platforms
+                let cmd_or_ctrl = modifiers.command() || modifiers.control();
+
+                match key {
+                    // Escape: Clear search
+                    Key::Named(Named::Escape) => {
+                        self.update(Message::ClearSearch)
+                    }
+                    // Enter: Navigate search results
+                    Key::Named(Named::Enter) => {
+                        if modifiers.shift() {
+                            self.update(Message::SearchPrev)
+                        } else {
+                            self.update(Message::SearchNext)
+                        }
+                    }
+                    // Cmd/Ctrl+O: Open file
+                    Key::Character(c) if c.as_str() == "o" && cmd_or_ctrl => {
+                        self.update(Message::OpenFileDialog)
+                    }
+                    // Cmd/Ctrl+G: Navigate search (alternative)
+                    Key::Character(c) if c.as_str() == "g" && cmd_or_ctrl => {
+                        if modifiers.shift() {
+                            self.update(Message::SearchPrev)
+                        } else {
+                            self.update(Message::SearchNext)
+                        }
+                    }
+                    // Cmd/Ctrl+F: Focus search input
+                    Key::Character(c) if c.as_str() == "f" && cmd_or_ctrl => {
+                        self.update(Message::FocusSearch)
+                    }
+                    _ => Task::none()
+                }
+            }
         }
     }
 
@@ -887,9 +1002,13 @@ impl App {
                 .style(button_toggle_style(self.search_use_regex))
                 .on_press(Message::ToggleRegex);
 
-            // Search input
+            // Search input with ID for programmatic focus
+            // on_submit is triggered when Enter is pressed while focused
+            // SearchSubmit checks current_modifiers to handle Shift+Enter
             let search_input = text_input("Find...", &self.search_query)
+                .id(self.search_input_id.clone())
                 .on_input(Message::SearchQueryChanged)
+                .on_submit(Message::SearchSubmit)
                 .padding(5)
                 .width(Length::Fixed(200.0));
 
