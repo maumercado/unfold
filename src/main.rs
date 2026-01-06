@@ -23,6 +23,56 @@ const COLOR_ROW_ODD: Color = Color::from_rgba(1.0, 1.0, 1.0, 0.03); // Subtle al
 const COLOR_SEARCH_MATCH: Color = Color::from_rgba(0.9, 0.7, 0.2, 0.3); // Yellow highlight for search matches
 const COLOR_SEARCH_CURRENT: Color = Color::from_rgba(0.9, 0.5, 0.1, 0.5); // Orange for current result
 const COLOR_SELECTED: Color = Color::from_rgba(0.3, 0.5, 0.8, 0.3); // Blue highlight for selected node
+const COLOR_ERROR: Color = Color::from_rgb(0.9, 0.4, 0.4);         // Red for error messages
+const COLOR_ERROR_CONTEXT: Color = Color::from_rgb(0.7, 0.7, 0.5); // Muted yellow for context line
+
+// Structured parse error for better error display
+#[derive(Debug, Clone)]
+struct ParseError {
+    message: String,
+    line: Option<usize>,
+    column: Option<usize>,
+    context_line: Option<String>,  // The actual line from the file
+    filename: String,
+}
+
+impl ParseError {
+    fn from_serde_error(e: &serde_json::Error, contents: &str, filename: &str) -> Self {
+        let line = e.line();
+        let column = e.column();
+
+        // Extract the problematic line from the file contents
+        let context_line = contents
+            .lines()
+            .nth(line.saturating_sub(1))
+            .map(|s| s.to_string());
+
+        // Classify the error for a friendlier message
+        let message = match e.classify() {
+            serde_json::error::Category::Io => format!("I/O error: {}", e),
+            serde_json::error::Category::Syntax => {
+                // Extract just the syntax error description
+                let full = e.to_string();
+                // serde_json format: "message at line X column Y"
+                if let Some(idx) = full.find(" at line ") {
+                    full[..idx].to_string()
+                } else {
+                    full
+                }
+            }
+            serde_json::error::Category::Data => format!("Data error: {}", e),
+            serde_json::error::Category::Eof => "Unexpected end of file".to_string(),
+        };
+
+        ParseError {
+            message,
+            line: Some(line),
+            column: Some(column),
+            context_line,
+            filename: filename.to_string(),
+        }
+    }
+}
 
 // Button colors for 3D effect
 const COLOR_BTN_BG: Color = Color::from_rgb(0.28, 0.28, 0.30);
@@ -179,6 +229,8 @@ struct App {
     current_modifiers: Modifiers,
     // Currently selected node (for copy, path display, etc.)
     selected_node: Option<usize>,
+    // Parse error details (for better error display)
+    parse_error: Option<ParseError>,
 }
 
 // User-configurable display preferences (for future use)
@@ -220,6 +272,7 @@ impl Default for App {
             search_input_id: WidgetId::unique(),
             current_modifiers: Modifiers::default(),
             selected_node: None,
+            parse_error: None,
         }
     }
 }
@@ -657,6 +710,7 @@ impl App {
                                         self.tree = Some(tree);
                                         self.current_file = Some(path);
                                         self.load_time = Some(elapsed);
+                                        self.parse_error = None;  // Clear any previous error
 
                                         // Rebuild flat_rows for virtual scrolling
                                         self.flat_rows = Self::flatten_visible_nodes(self.tree.as_ref().unwrap());
@@ -669,13 +723,27 @@ impl App {
                                             });
                                     }
                                     Err(e) => {
-                                        self.status = format!("✗ Parse error: {}", e);
+                                        let filename = path.file_name()
+                                            .map(|n| n.to_string_lossy().to_string())
+                                            .unwrap_or_else(|| "unknown".to_string());
+                                        self.parse_error = Some(ParseError::from_serde_error(&e, &contents, &filename));
+                                        self.status = format!("✗ Parse error in {}", filename);
                                         self.tree = None;
                                         self.current_file = None;
                                     }
                                 }
                             }
                             Err(e) => {
+                                let filename = path.file_name()
+                                    .map(|n| n.to_string_lossy().to_string())
+                                    .unwrap_or_else(|| "unknown".to_string());
+                                self.parse_error = Some(ParseError {
+                                    message: e.to_string(),
+                                    line: None,
+                                    column: None,
+                                    context_line: None,
+                                    filename,
+                                });
                                 self.status = format!("✗ File error: {}", e);
                                 self.tree = None;
                                 self.current_file = None;
@@ -1162,37 +1230,118 @@ impl App {
                 .into()
             }
             None => {
-                // Show welcome screen when no file loaded
-                let header = column![
-                    text("Unfold").size(32),
-                    text("JSON Viewer").size(16).color(COLOR_BRACKET),
-                ]
-                .spacing(5)
-                .align_x(Center);
+                // Show error screen or welcome screen
+                if let Some(ref error) = self.parse_error {
+                    // Error screen with detailed information
+                    let error_icon = text("⚠").size(48).color(COLOR_ERROR);
 
-                let open_button = button(text("Open File...").size(14))
-                    .on_press(Message::OpenFileDialog)
-                    .padding([8, 16])
-                    .style(button_3d_style);
+                    let error_title = text(format!("Failed to parse {}", error.filename))
+                        .size(18)
+                        .color(COLOR_ERROR);
 
-                let open_new_window_button = button(text("Open in New Window...").size(12))
-                    .on_press(Message::OpenFileInNewWindow)
-                    .padding([6, 12])
-                    .style(button_3d_style);
+                    let error_message = text(&error.message)
+                        .size(14)
+                        .color(Color::WHITE);
 
-                let welcome = column![
-                    header,
-                    open_button,
-                    open_new_window_button,
-                ]
-                .spacing(15)
-                .align_x(Center);
+                    // Location info (line:column)
+                    let location_text = match (error.line, error.column) {
+                        (Some(line), Some(col)) => format!("Line {}, Column {}", line, col),
+                        (Some(line), None) => format!("Line {}", line),
+                        _ => String::new(),
+                    };
+                    let location = text(location_text)
+                        .size(13)
+                        .color(COLOR_BRACKET);
 
-                container(welcome)
-                    .width(Fill)
-                    .height(Fill)
-                    .center(Fill)
-                    .into()
+                    // Context line with caret pointing to error
+                    let context_section: Element<'_, Message> = if let Some(ref ctx_line) = error.context_line {
+                        let truncated = if ctx_line.len() > 80 {
+                            format!("{}...", &ctx_line[..80])
+                        } else {
+                            ctx_line.clone()
+                        };
+
+                        // Build caret indicator pointing to the column
+                        let caret = if let Some(col) = error.column {
+                            let spaces = " ".repeat(col.saturating_sub(1));
+                            format!("{}^", spaces)
+                        } else {
+                            String::new()
+                        };
+
+                        column![
+                            text(truncated)
+                                .size(12)
+                                .font(Font::MONOSPACE)
+                                .color(COLOR_ERROR_CONTEXT),
+                            text(caret)
+                                .size(12)
+                                .font(Font::MONOSPACE)
+                                .color(COLOR_ERROR),
+                        ]
+                        .spacing(0)
+                        .into()
+                    } else {
+                        Space::new().into()
+                    };
+
+                    let try_again_button = button(text("Try Another File...").size(14))
+                        .on_press(Message::OpenFileDialog)
+                        .padding([8, 16])
+                        .style(button_3d_style);
+
+                    let error_content = column![
+                        error_icon,
+                        error_title,
+                        Space::new().height(Length::Fixed(10.0)),
+                        error_message,
+                        location,
+                        Space::new().height(Length::Fixed(15.0)),
+                        context_section,
+                        Space::new().height(Length::Fixed(20.0)),
+                        try_again_button,
+                    ]
+                    .spacing(5)
+                    .align_x(Center);
+
+                    container(error_content)
+                        .width(Fill)
+                        .height(Fill)
+                        .center(Fill)
+                        .into()
+                } else {
+                    // Normal welcome screen
+                    let header = column![
+                        text("Unfold").size(32),
+                        text("JSON Viewer").size(16).color(COLOR_BRACKET),
+                    ]
+                    .spacing(5)
+                    .align_x(Center);
+
+                    let open_button = button(text("Open File...").size(14))
+                        .on_press(Message::OpenFileDialog)
+                        .padding([8, 16])
+                        .style(button_3d_style);
+
+                    let open_new_window_button = button(text("Open in New Window...").size(12))
+                        .on_press(Message::OpenFileInNewWindow)
+                        .padding([6, 12])
+                        .style(button_3d_style);
+
+                    let welcome = column![
+                        header,
+                        open_button,
+                        open_new_window_button,
+                    ]
+                    .spacing(15)
+                    .align_x(Center);
+
+                    container(welcome)
+                        .width(Fill)
+                        .height(Fill)
+                        .center(Fill)
+                        .into()
+                }
             }
         };
 
