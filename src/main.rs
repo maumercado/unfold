@@ -11,20 +11,121 @@ use iced::keyboard::{self, Key, Modifiers, key::Named};
 use std::collections::HashSet;
 use regex::Regex;
 
-// Color scheme for syntax highlighting
-const COLOR_KEY: Color = Color::from_rgb(0.4, 0.7, 0.9);       // Light blue for keys
-const COLOR_STRING: Color = Color::from_rgb(0.6, 0.8, 0.5);    // Green for strings
-const COLOR_NUMBER: Color = Color::from_rgb(0.9, 0.7, 0.4);    // Orange for numbers
-const COLOR_BOOL: Color = Color::from_rgb(0.8, 0.5, 0.7);      // Purple for booleans
-const COLOR_NULL: Color = Color::from_rgb(0.6, 0.6, 0.6);      // Gray for null
-const COLOR_BRACKET: Color = Color::from_rgb(0.7, 0.7, 0.7);   // Light gray for brackets
-const COLOR_INDICATOR: Color = Color::from_rgb(0.5, 0.5, 0.5); // Dim for expand indicator
-const COLOR_ROW_ODD: Color = Color::from_rgba(1.0, 1.0, 1.0, 0.03); // Subtle alternating stripe
-const COLOR_SEARCH_MATCH: Color = Color::from_rgba(0.9, 0.7, 0.2, 0.3); // Yellow highlight for search matches
-const COLOR_SEARCH_CURRENT: Color = Color::from_rgba(0.9, 0.5, 0.1, 0.5); // Orange for current result
-const COLOR_SELECTED: Color = Color::from_rgba(0.3, 0.5, 0.8, 0.3); // Blue highlight for selected node
-const COLOR_ERROR: Color = Color::from_rgb(0.9, 0.4, 0.4);         // Red for error messages
-const COLOR_ERROR_CONTEXT: Color = Color::from_rgb(0.7, 0.7, 0.5); // Muted yellow for context line
+// Theme system
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum AppTheme {
+    Dark,
+    Light,
+}
+
+// All theme-dependent colors in one place
+#[derive(Debug, Clone, Copy)]
+struct ThemeColors {
+    // Syntax highlighting
+    key: Color,
+    string: Color,
+    number: Color,
+    boolean: Color,
+    null: Color,
+    bracket: Color,
+    indicator: Color,
+    // UI colors
+    background: Color,
+    toolbar_bg: Color,
+    status_bar_bg: Color,
+    row_odd: Color,
+    search_match: Color,
+    search_current: Color,
+    selected: Color,
+    error: Color,
+    error_context: Color,
+    text_primary: Color,
+    text_secondary: Color,
+    // Button colors
+    btn_bg: Color,
+    btn_bg_hover: Color,
+    btn_border_top: Color,
+    btn_border_bottom: Color,
+    btn_disabled: Color,
+    btn_active_bg: Color,
+    btn_active_border: Color,
+}
+
+impl ThemeColors {
+    fn dark() -> Self {
+        ThemeColors {
+            // Syntax highlighting (bright on dark)
+            key: Color::from_rgb(0.4, 0.7, 0.9),
+            string: Color::from_rgb(0.6, 0.8, 0.5),
+            number: Color::from_rgb(0.9, 0.7, 0.4),
+            boolean: Color::from_rgb(0.8, 0.5, 0.7),
+            null: Color::from_rgb(0.6, 0.6, 0.6),
+            bracket: Color::from_rgb(0.7, 0.7, 0.7),
+            indicator: Color::from_rgb(0.5, 0.5, 0.5),
+            // UI colors
+            background: Color::from_rgb(0.12, 0.12, 0.12),
+            toolbar_bg: Color::from_rgb(0.12, 0.12, 0.12),
+            status_bar_bg: Color::from_rgb(0.15, 0.15, 0.15),
+            row_odd: Color::from_rgba(1.0, 1.0, 1.0, 0.03),
+            search_match: Color::from_rgba(0.9, 0.7, 0.2, 0.3),
+            search_current: Color::from_rgba(0.9, 0.5, 0.1, 0.5),
+            selected: Color::from_rgba(0.3, 0.5, 0.8, 0.3),
+            error: Color::from_rgb(0.9, 0.4, 0.4),
+            error_context: Color::from_rgb(0.7, 0.7, 0.5),
+            text_primary: Color::WHITE,
+            text_secondary: Color::from_rgb(0.7, 0.7, 0.7),
+            // Button colors
+            btn_bg: Color::from_rgb(0.28, 0.28, 0.30),
+            btn_bg_hover: Color::from_rgb(0.32, 0.32, 0.35),
+            btn_border_top: Color::from_rgb(0.45, 0.45, 0.48),
+            btn_border_bottom: Color::from_rgb(0.15, 0.15, 0.17),
+            btn_disabled: Color::from_rgb(0.22, 0.22, 0.24),
+            btn_active_bg: Color::from_rgb(0.3, 0.5, 0.7),
+            btn_active_border: Color::from_rgb(0.4, 0.6, 0.8),
+        }
+    }
+
+    fn light() -> Self {
+        ThemeColors {
+            // Syntax highlighting (darker for light background)
+            key: Color::from_rgb(0.0, 0.4, 0.7),
+            string: Color::from_rgb(0.2, 0.5, 0.2),
+            number: Color::from_rgb(0.8, 0.4, 0.0),
+            boolean: Color::from_rgb(0.6, 0.2, 0.6),
+            null: Color::from_rgb(0.5, 0.5, 0.5),
+            bracket: Color::from_rgb(0.3, 0.3, 0.3),
+            indicator: Color::from_rgb(0.6, 0.6, 0.6),
+            // UI colors
+            background: Color::from_rgb(0.98, 0.98, 0.98),
+            toolbar_bg: Color::from_rgb(0.94, 0.94, 0.94),
+            status_bar_bg: Color::from_rgb(0.90, 0.90, 0.90),
+            row_odd: Color::from_rgba(0.0, 0.0, 0.0, 0.03),
+            search_match: Color::from_rgba(1.0, 0.9, 0.4, 0.5),
+            search_current: Color::from_rgba(1.0, 0.6, 0.2, 0.6),
+            selected: Color::from_rgba(0.3, 0.5, 0.8, 0.2),
+            error: Color::from_rgb(0.8, 0.2, 0.2),
+            error_context: Color::from_rgb(0.6, 0.5, 0.2),
+            text_primary: Color::from_rgb(0.1, 0.1, 0.1),
+            text_secondary: Color::from_rgb(0.4, 0.4, 0.4),
+            // Button colors (lighter)
+            btn_bg: Color::from_rgb(0.88, 0.88, 0.90),
+            btn_bg_hover: Color::from_rgb(0.82, 0.82, 0.85),
+            btn_border_top: Color::from_rgb(0.95, 0.95, 0.98),
+            btn_border_bottom: Color::from_rgb(0.70, 0.70, 0.72),
+            btn_disabled: Color::from_rgb(0.92, 0.92, 0.94),
+            btn_active_bg: Color::from_rgb(0.4, 0.6, 0.85),
+            btn_active_border: Color::from_rgb(0.3, 0.5, 0.75),
+        }
+    }
+}
+
+fn get_theme_colors(theme: AppTheme) -> ThemeColors {
+    match theme {
+        AppTheme::Dark => ThemeColors::dark(),
+        AppTheme::Light => ThemeColors::light(),
+    }
+}
+
 
 // Structured parse error for better error display
 #[derive(Debug, Clone)]
@@ -74,59 +175,51 @@ impl ParseError {
     }
 }
 
-// Button colors for 3D effect
-const COLOR_BTN_BG: Color = Color::from_rgb(0.28, 0.28, 0.30);
-const COLOR_BTN_BG_HOVER: Color = Color::from_rgb(0.32, 0.32, 0.35);
-const COLOR_BTN_BORDER_TOP: Color = Color::from_rgb(0.45, 0.45, 0.48);
-const COLOR_BTN_BORDER_BOTTOM: Color = Color::from_rgb(0.15, 0.15, 0.17);
-const COLOR_BTN_DISABLED: Color = Color::from_rgb(0.22, 0.22, 0.24);
-
 // Virtual scrolling constants
 const ROW_HEIGHT: f32 = 16.0;      // Fixed height per row (tight for connected tree lines)
 const BUFFER_ROWS: usize = 5;      // Extra rows above/below (reduced for performance)
 
 use iced::widget::button::Status as ButtonStatus;
 
-/// Custom 3D button style with raised appearance
-fn button_3d_style(_theme: &iced::Theme, status: ButtonStatus) -> button::Style {
-    let (bg_color, text_color, border_color) = match status {
-        ButtonStatus::Active => (COLOR_BTN_BG, Color::from_rgb(0.9, 0.9, 0.9), COLOR_BTN_BORDER_TOP),
-        ButtonStatus::Hovered => (COLOR_BTN_BG_HOVER, Color::WHITE, COLOR_BTN_BORDER_TOP),
-        ButtonStatus::Pressed => (COLOR_BTN_BORDER_BOTTOM, Color::from_rgb(0.8, 0.8, 0.8), COLOR_BTN_BORDER_BOTTOM),
-        ButtonStatus::Disabled => (COLOR_BTN_DISABLED, Color::from_rgb(0.5, 0.5, 0.5), COLOR_BTN_DISABLED),
-    };
+/// Custom 3D button style with raised appearance (theme-aware)
+fn button_3d_style_themed(colors: ThemeColors) -> impl Fn(&iced::Theme, ButtonStatus) -> button::Style {
+    move |_theme: &iced::Theme, status: ButtonStatus| {
+        let (bg_color, text_color, border_color) = match status {
+            ButtonStatus::Active => (colors.btn_bg, colors.text_primary, colors.btn_border_top),
+            ButtonStatus::Hovered => (colors.btn_bg_hover, colors.text_primary, colors.btn_border_top),
+            ButtonStatus::Pressed => (colors.btn_border_bottom, colors.text_secondary, colors.btn_border_bottom),
+            ButtonStatus::Disabled => (colors.btn_disabled, colors.text_secondary, colors.btn_disabled),
+        };
 
-    button::Style {
-        background: Some(bg_color.into()),
-        text_color,
-        border: Border {
-            color: border_color,
-            width: 1.0,
-            radius: Radius::from(4.0),
-        },
-        shadow: Shadow {
-            color: Color::from_rgba(0.0, 0.0, 0.0, 0.3),
-            offset: iced::Vector::new(0.0, 2.0),
-            blur_radius: 3.0,
-        },
-        snap: true,
+        button::Style {
+            background: Some(bg_color.into()),
+            text_color,
+            border: Border {
+                color: border_color,
+                width: 1.0,
+                radius: Radius::from(4.0),
+            },
+            shadow: Shadow {
+                color: Color::from_rgba(0.0, 0.0, 0.0, 0.3),
+                offset: iced::Vector::new(0.0, 2.0),
+                blur_radius: 3.0,
+            },
+            snap: true,
+        }
     }
 }
 
-/// Toggle button style - highlighted when active
-fn button_toggle_style(is_active: bool) -> impl Fn(&iced::Theme, ButtonStatus) -> button::Style {
+/// Toggle button style - highlighted when active (theme-aware)
+fn button_toggle_style_themed(is_active: bool, colors: ThemeColors) -> impl Fn(&iced::Theme, ButtonStatus) -> button::Style {
     move |_theme: &iced::Theme, status: ButtonStatus| {
-        let active_bg = Color::from_rgb(0.3, 0.5, 0.7);      // Blue when active
-        let active_border = Color::from_rgb(0.4, 0.6, 0.8);
-
         let (bg_color, text_color, border_color) = match (is_active, status) {
-            (true, ButtonStatus::Active) => (active_bg, Color::WHITE, active_border),
-            (true, ButtonStatus::Hovered) => (Color::from_rgb(0.35, 0.55, 0.75), Color::WHITE, active_border),
-            (true, ButtonStatus::Pressed) => (Color::from_rgb(0.25, 0.45, 0.65), Color::WHITE, active_border),
-            (false, ButtonStatus::Active) => (COLOR_BTN_BG, Color::from_rgb(0.7, 0.7, 0.7), COLOR_BTN_BORDER_TOP),
-            (false, ButtonStatus::Hovered) => (COLOR_BTN_BG_HOVER, Color::from_rgb(0.9, 0.9, 0.9), COLOR_BTN_BORDER_TOP),
-            (false, ButtonStatus::Pressed) => (COLOR_BTN_BORDER_BOTTOM, Color::from_rgb(0.8, 0.8, 0.8), COLOR_BTN_BORDER_BOTTOM),
-            (_, ButtonStatus::Disabled) => (COLOR_BTN_DISABLED, Color::from_rgb(0.5, 0.5, 0.5), COLOR_BTN_DISABLED),
+            (true, ButtonStatus::Active) => (colors.btn_active_bg, colors.text_primary, colors.btn_active_border),
+            (true, ButtonStatus::Hovered) => (colors.btn_active_bg, colors.text_primary, colors.btn_active_border),
+            (true, ButtonStatus::Pressed) => (colors.btn_active_bg, colors.text_primary, colors.btn_active_border),
+            (false, ButtonStatus::Active) => (colors.btn_bg, colors.text_secondary, colors.btn_border_top),
+            (false, ButtonStatus::Hovered) => (colors.btn_bg_hover, colors.text_primary, colors.btn_border_top),
+            (false, ButtonStatus::Pressed) => (colors.btn_border_bottom, colors.text_secondary, colors.btn_border_bottom),
+            (_, ButtonStatus::Disabled) => (colors.btn_disabled, colors.text_secondary, colors.btn_disabled),
         };
 
         button::Style {
@@ -155,6 +248,31 @@ use std::env;
 use std::process::Command;
 
 /// A flattened row ready for rendering
+/// Value type for theme-aware coloring
+#[derive(Debug, Clone, Copy)]
+enum ValueType {
+    Null,
+    Bool,
+    Number,
+    String,
+    Bracket,
+    Key,
+}
+
+impl ValueType {
+    /// Get the appropriate color for this value type given a theme
+    fn color(&self, colors: &ThemeColors) -> Color {
+        match self {
+            ValueType::Null => colors.null,
+            ValueType::Bool => colors.boolean,
+            ValueType::Number => colors.number,
+            ValueType::String => colors.string,
+            ValueType::Bracket => colors.bracket,
+            ValueType::Key => colors.key,
+        }
+    }
+}
+
 /// This pre-computes everything needed to render a single tree row
 #[derive(Debug, Clone)]
 struct FlatRow {
@@ -166,8 +284,8 @@ struct FlatRow {
     key: Option<String>,
     /// The value to display (formatted string)
     value_display: String,
-    /// Color for the value
-    value_color: Color,
+    /// Type of value (for theme-aware coloring)
+    value_type: ValueType,
     /// Is this node expandable (has children)?
     is_expandable: bool,
     /// Is this node currently expanded?
@@ -205,6 +323,8 @@ struct App {
     current_file: Option<PathBuf>,
     #[allow(dead_code)]
     preferences: Preferences,
+    // Current theme (dark/light)
+    theme: AppTheme,
     // Time taken to load and parse the file
     load_time: Option<Duration>,
     // Flattened rows for virtual scrolling (rebuilt when tree changes)
@@ -257,6 +377,7 @@ impl Default for App {
             status: String::from("No file loaded"),
             current_file: None,
             preferences: Preferences::default(),
+            theme: AppTheme::Dark,  // Default to dark theme
             load_time: None,
             flat_rows: Vec::new(),
             viewport_height: 600.0,
@@ -308,6 +429,8 @@ enum Message {
     CopySelectedValue,
     // Copy selected node's path to clipboard
     CopySelectedPath,
+    // Toggle between dark and light theme
+    ToggleTheme,
 }
 
 impl App {
@@ -424,23 +547,23 @@ impl App {
         };
 
         // Format value (same logic as collect_nodes)
-        let (value_display, value_color) = match &node.value {
-            JsonValue::Null => ("null".to_string(), COLOR_NULL),
-            JsonValue::Bool(b) => (b.to_string(), COLOR_BOOL),
-            JsonValue::Number(n) => (n.to_string(), COLOR_NUMBER),
-            JsonValue::String(s) => (format!("\"{}\"", s), COLOR_STRING),
+        let (value_display, value_type) = match &node.value {
+            JsonValue::Null => ("null".to_string(), ValueType::Null),
+            JsonValue::Bool(b) => (b.to_string(), ValueType::Bool),
+            JsonValue::Number(n) => (n.to_string(), ValueType::Number),
+            JsonValue::String(s) => (format!("\"{}\"", s), ValueType::String),
             JsonValue::Array => {
                 if node.expanded {
-                    (":".to_string(), COLOR_BRACKET)
+                    (":".to_string(), ValueType::Bracket)
                 } else {
-                    ("[...]".to_string(), COLOR_KEY)
+                    ("[...]".to_string(), ValueType::Key)
                 }
             }
             JsonValue::Object => {
                 if node.expanded {
-                    (":".to_string(), COLOR_BRACKET)
+                    (":".to_string(), ValueType::Bracket)
                 } else {
-                    ("{...}".to_string(), COLOR_KEY)
+                    ("{...}".to_string(), ValueType::Key)
                 }
             }
         };
@@ -454,7 +577,7 @@ impl App {
             prefix: current_prefix,
             key: node.key.as_ref().map(|k| k.to_string()),
             value_display,
-            value_color,
+            value_type,
             is_expandable: node.is_expandable(),
             is_expanded: node.expanded,
             row_index,
@@ -487,6 +610,10 @@ impl App {
 
     /// Render a single FlatRow into an Element
     fn render_flat_row<'a>(&self, flat_row: &FlatRow) -> Element<'a, Message> {
+        // Get theme colors
+        let colors = get_theme_colors(self.theme);
+        let value_color = flat_row.value_type.color(&colors);
+
         // Build the row element
         let node_row: Element<'a, Message> = if flat_row.is_expandable {
             // Expandable node - make it clickable
@@ -494,8 +621,8 @@ impl App {
             let indicator = if flat_row.is_expanded { "⊟ " } else { "⊞ " };
 
             let mut row_elements: Vec<Element<'a, Message>> = vec![
-                text(flat_row.prefix.clone()).font(Font::MONOSPACE).size(13).color(COLOR_BRACKET).into(),
-                text(indicator).font(Font::MONOSPACE).size(13).color(COLOR_INDICATOR).into(),
+                text(flat_row.prefix.clone()).font(Font::MONOSPACE).size(13).color(colors.bracket).into(),
+                text(indicator).font(Font::MONOSPACE).size(13).color(colors.indicator).into(),
             ];
 
             // Show key if it exists (empty keys shown as "" for visibility)
@@ -505,14 +632,14 @@ impl App {
                     text(display_key)
                         .font(Font::MONOSPACE)
                         .size(13)
-                        .color(COLOR_KEY)
+                        .color(colors.key)
                         .into()
                 );
                 row_elements.push(
                     text(": ")
                         .font(Font::MONOSPACE)
                         .size(13)
-                        .color(COLOR_BRACKET)
+                        .color(colors.bracket)
                         .into()
                 );
             }
@@ -523,7 +650,7 @@ impl App {
                     text(flat_row.value_display.clone())
                         .font(Font::MONOSPACE)
                         .size(13)
-                        .color(flat_row.value_color)
+                        .color(value_color)
                         .into()
                 );
             }
@@ -537,8 +664,8 @@ impl App {
             // Leaf node - clickable to select
             // Add "─ " to complete the connector (same width as icon + space)
             let mut row_elements: Vec<Element<'a, Message>> = vec![
-                text(flat_row.prefix.clone()).font(Font::MONOSPACE).size(13).color(COLOR_BRACKET).into(),
-                text("─ ").font(Font::MONOSPACE).size(13).color(COLOR_BRACKET).into(),
+                text(flat_row.prefix.clone()).font(Font::MONOSPACE).size(13).color(colors.bracket).into(),
+                text("─ ").font(Font::MONOSPACE).size(13).color(colors.bracket).into(),
             ];
 
             // Show key if it exists (empty keys shown as "" for visibility)
@@ -548,14 +675,14 @@ impl App {
                     text(display_key)
                         .font(Font::MONOSPACE)
                         .size(13)
-                        .color(COLOR_KEY)
+                        .color(colors.key)
                         .into()
                 );
                 row_elements.push(
                     text(": ")
                         .font(Font::MONOSPACE)
                         .size(13)
-                        .color(COLOR_BRACKET)
+                        .color(colors.bracket)
                         .into()
                 );
             }
@@ -564,7 +691,7 @@ impl App {
                 text(flat_row.value_display.clone())
                     .font(Font::MONOSPACE)
                     .size(13)
-                    .color(flat_row.value_color)
+                    .color(value_color)
                     .into()
             );
 
@@ -585,13 +712,13 @@ impl App {
 
         // Priority: current search result > selected > search match > zebra stripe
         let background_color = if is_current_result {
-            Some(COLOR_SEARCH_CURRENT)
+            Some(colors.search_current)
         } else if is_selected {
-            Some(COLOR_SELECTED)
+            Some(colors.selected)
         } else if is_match {
-            Some(COLOR_SEARCH_MATCH)
+            Some(colors.search_match)
         } else if flat_row.row_index % 2 == 1 {
-            Some(COLOR_ROW_ODD)
+            Some(colors.row_odd)
         } else {
             None
         };
@@ -914,6 +1041,10 @@ impl App {
                     Key::Character(c) if c.as_str() == "c" && cmd_or_ctrl && modifiers.shift() => {
                         self.update(Message::CopySelectedPath)
                     }
+                    // Cmd/Ctrl+T: Toggle theme (dark/light)
+                    Key::Character(c) if c.as_str() == "t" && cmd_or_ctrl => {
+                        self.update(Message::ToggleTheme)
+                    }
                     _ => Task::none()
                 }
             }
@@ -968,6 +1099,14 @@ impl App {
                         return clipboard::write(flat_row.path.clone());
                     }
                 }
+                Task::none()
+            }
+            Message::ToggleTheme => {
+                // Toggle between dark and light theme
+                self.theme = match self.theme {
+                    AppTheme::Dark => AppTheme::Light,
+                    AppTheme::Light => AppTheme::Dark,
+                };
                 Task::none()
             }
         }
@@ -1177,6 +1316,9 @@ impl App {
 
     // Render the UI
     fn view(&self) -> Element<'_, Message> {
+        // Get theme colors
+        let colors = get_theme_colors(self.theme);
+
         // Tree display section
         let tree_view: Element<'_, Message> = match &self.tree {
             Some(_tree) => {
@@ -1233,15 +1375,15 @@ impl App {
                 // Show error screen or welcome screen
                 if let Some(ref error) = self.parse_error {
                     // Error screen with detailed information
-                    let error_icon = text("⚠").size(48).color(COLOR_ERROR);
+                    let error_icon = text("⚠").size(48).color(colors.error);
 
                     let error_title = text(format!("Failed to parse {}", error.filename))
                         .size(18)
-                        .color(COLOR_ERROR);
+                        .color(colors.error);
 
                     let error_message = text(&error.message)
                         .size(14)
-                        .color(Color::WHITE);
+                        .color(colors.text_primary);
 
                     // Location info (line:column)
                     let location_text = match (error.line, error.column) {
@@ -1251,7 +1393,7 @@ impl App {
                     };
                     let location = text(location_text)
                         .size(13)
-                        .color(COLOR_BRACKET);
+                        .color(colors.text_secondary);
 
                     // Context line with caret pointing to error
                     let context_section: Element<'_, Message> = if let Some(ref ctx_line) = error.context_line {
@@ -1273,11 +1415,11 @@ impl App {
                             text(truncated)
                                 .size(12)
                                 .font(Font::MONOSPACE)
-                                .color(COLOR_ERROR_CONTEXT),
+                                .color(colors.error_context),
                             text(caret)
                                 .size(12)
                                 .font(Font::MONOSPACE)
-                                .color(COLOR_ERROR),
+                                .color(colors.error),
                         ]
                         .spacing(0)
                         .into()
@@ -1288,7 +1430,7 @@ impl App {
                     let try_again_button = button(text("Try Another File...").size(14))
                         .on_press(Message::OpenFileDialog)
                         .padding([8, 16])
-                        .style(button_3d_style);
+                        .style(button_3d_style_themed(colors));
 
                     let error_content = column![
                         error_icon,
@@ -1308,38 +1450,82 @@ impl App {
                         .width(Fill)
                         .height(Fill)
                         .center(Fill)
+                        .style(move |_theme| container::Style {
+                            background: Some(colors.background.into()),
+                            ..Default::default()
+                        })
                         .into()
                 } else {
-                    // Normal welcome screen
-                    let header = column![
-                        text("Unfold").size(32),
-                        text("JSON Viewer").size(16).color(COLOR_BRACKET),
-                    ]
-                    .spacing(5)
-                    .align_x(Center);
+                    // Normal welcome screen (Dadroit-style)
+                    let welcome_text = text("Welcome to Unfold JSON Viewer.")
+                        .size(15)
+                        .color(colors.text_secondary);
 
-                    let open_button = button(text("Open File...").size(14))
-                        .on_press(Message::OpenFileDialog)
-                        .padding([8, 16])
-                        .style(button_3d_style);
+                    // "Open" as a clickable underlined link
+                    let open_link = button(
+                        text("Open").size(15).style(|_theme| text::Style {
+                            color: Some(Color::from_rgb(0.3, 0.5, 0.8)),
+                        })
+                    )
+                    .on_press(Message::OpenFileDialog)
+                    .padding(0)
+                    .style(|_theme, _status| button::Style {
+                        background: None,
+                        text_color: Color::from_rgb(0.3, 0.5, 0.8),
+                        ..Default::default()
+                    });
 
-                    let open_new_window_button = button(text("Open in New Window...").size(12))
-                        .on_press(Message::OpenFileInNewWindow)
-                        .padding([6, 12])
-                        .style(button_3d_style);
+                    let action_row = row![
+                        open_link,
+                        text(" or drag and drop .json file here.").size(15).color(colors.text_secondary),
+                    ];
+
+                    // "Open in new window" link
+                    let new_window_link = button(
+                        text("Open in new window").size(13)
+                    )
+                    .on_press(Message::OpenFileInNewWindow)
+                    .padding(0)
+                    .style(|_theme, _status| button::Style {
+                        background: None,
+                        text_color: Color::from_rgb(0.4, 0.55, 0.75),
+                        ..Default::default()
+                    });
+
+                    // Theme toggle as subtle text link
+                    let theme_label = match self.theme {
+                        AppTheme::Dark => "Switch to Light Mode",
+                        AppTheme::Light => "Switch to Dark Mode",
+                    };
+                    let theme_link = button(
+                        text(theme_label).size(12)
+                    )
+                    .on_press(Message::ToggleTheme)
+                    .padding(0)
+                    .style(|_theme, _status| button::Style {
+                        background: None,
+                        text_color: Color::from_rgb(0.5, 0.5, 0.5),
+                        ..Default::default()
+                    });
 
                     let welcome = column![
-                        header,
-                        open_button,
-                        open_new_window_button,
+                        welcome_text,
+                        action_row,
+                        new_window_link,
+                        Space::new().height(Length::Fixed(20.0)),
+                        theme_link,
                     ]
-                    .spacing(15)
+                    .spacing(8)
                     .align_x(Center);
 
                     container(welcome)
                         .width(Fill)
                         .height(Fill)
                         .center(Fill)
+                        .style(move |_theme| container::Style {
+                            background: Some(colors.background.into()),
+                            ..Default::default()
+                        })
                         .into()
                 }
             }
@@ -1350,12 +1536,12 @@ impl App {
             // Search option toggle buttons (Dadroit style)
             let case_button = button(text("Aa").size(11))
                 .padding([4, 8])
-                .style(button_toggle_style(self.search_case_sensitive))
+                .style(button_toggle_style_themed(self.search_case_sensitive, colors))
                 .on_press(Message::ToggleCaseSensitive);
 
             let regex_button = button(text(".*").size(11))
                 .padding([4, 8])
-                .style(button_toggle_style(self.search_use_regex))
+                .style(button_toggle_style_themed(self.search_use_regex, colors))
                 .on_press(Message::ToggleRegex);
 
             // Search input with ID for programmatic focus
@@ -1389,13 +1575,13 @@ impl App {
                 text("◂ Prev").size(11)
             )
             .padding([5, 12])
-            .style(button_3d_style);
+            .style(button_3d_style_themed(colors));
 
             let next_button = button(
                 text("Next ▸").size(11)
             )
             .padding([5, 12])
-            .style(button_3d_style);
+            .style(button_3d_style_themed(colors));
 
             // Only add on_press if there are results
             let prev_button = if has_results {
@@ -1410,6 +1596,16 @@ impl App {
                 next_button
             };
 
+            // Theme toggle button (half-moon icons for better visual balance)
+            let theme_icon = match self.theme {
+                AppTheme::Dark => "◑",   // Half-dark icon for switching to light
+                AppTheme::Light => "◐",  // Half-light icon for switching to dark
+            };
+            let theme_button = button(text(theme_icon).size(16))
+                .padding([4, 10])
+                .style(button_3d_style_themed(colors))
+                .on_press(Message::ToggleTheme);
+
             let toolbar = container(
                 row![
                     case_button,
@@ -1422,14 +1618,16 @@ impl App {
                     Space::new().width(Length::Fixed(5.0)),
                     next_button,
                     Space::new().width(Length::Fixed(10.0)),
-                    text(search_result_text).size(11).color(COLOR_BRACKET),
+                    text(search_result_text).size(11).color(colors.text_secondary),
+                    Space::new().width(Length::Fill),
+                    theme_button,
                 ]
                 .align_y(Center)
             )
             .width(Fill)
             .padding([8, 10])
-            .style(|_theme| container::Style {
-                background: Some(Color::from_rgb(0.12, 0.12, 0.12).into()),
+            .style(move |_theme| container::Style {
+                background: Some(colors.toolbar_bg.into()),
                 ..Default::default()
             });
 
@@ -1472,21 +1670,30 @@ impl App {
 
             let status_bar = container(
                 row![
-                    text(node_count).size(12).color(COLOR_BRACKET),
-                    text("  |  ").size(12).color(COLOR_BRACKET),
-                    text(path_display).size(12).color(COLOR_KEY),
+                    text(node_count).size(12).color(colors.text_secondary),
+                    text("  |  ").size(12).color(colors.text_secondary),
+                    text(path_display).size(12).color(colors.key),
                     Space::new().width(Length::Fill),
-                    text(load_time_str).size(12).color(COLOR_BRACKET),
+                    text(load_time_str).size(12).color(colors.text_secondary),
                 ]
             )
             .width(Fill)
             .padding([5, 10])
-            .style(|_theme| container::Style {
-                background: Some(Color::from_rgb(0.15, 0.15, 0.15).into()),
+            .style(move |_theme| container::Style {
+                background: Some(colors.status_bar_bg.into()),
                 ..Default::default()
             });
 
-            column![toolbar, tree_view, status_bar].into()
+            // Wrap tree_view in a container with background
+            let tree_container = container(tree_view)
+                .width(Fill)
+                .height(Fill)
+                .style(move |_theme| container::Style {
+                    background: Some(colors.background.into()),
+                    ..Default::default()
+                });
+
+            column![toolbar, tree_container, status_bar].into()
         } else {
             tree_view  // This is the welcome screen
         }
