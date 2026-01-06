@@ -124,6 +124,8 @@ struct FlatRow {
     is_expanded: bool,
     /// Row index in flattened list (for zebra striping)
     row_index: usize,
+    /// JSON path to this node (e.g., "users[2].email")
+    path: String,
 }
 
 pub fn main() -> iced::Result {
@@ -251,6 +253,8 @@ enum Message {
     SelectNode(usize),
     // Copy selected node's value to clipboard
     CopySelectedValue,
+    // Copy selected node's path to clipboard
+    CopySelectedPath,
 }
 
 impl App {
@@ -313,10 +317,20 @@ impl App {
 
         // Start from root's children (skip root node like collect_nodes does)
         if let Some(root) = tree.get_node(tree.root_index()) {
+            // Determine if root is array or object for path building
+            let root_is_array = matches!(root.value, JsonValue::Array);
             let child_count = root.children.len();
             for (i, &child_index) in root.children.iter().enumerate() {
                 let is_last = i == child_count - 1;
-                Self::flatten_node(tree, child_index, &mut rows, "", is_last, false);
+                // Build initial path segment based on root type
+                let child_path = if root_is_array {
+                    format!("[{}]", i)
+                } else if let Some(child) = tree.get_node(child_index) {
+                    child.key.as_deref().unwrap_or("").to_string()
+                } else {
+                    String::new()
+                };
+                Self::flatten_node(tree, child_index, &mut rows, "", is_last, false, &child_path);
             }
         }
 
@@ -331,6 +345,7 @@ impl App {
         prefix: &str,
         is_last: bool,
         is_root: bool,
+        current_path: &str,
     ) {
         let Some(node) = tree.get_node(index) else {
             return;
@@ -390,14 +405,29 @@ impl App {
             is_expandable: node.is_expandable(),
             is_expanded: node.expanded,
             row_index,
+            path: current_path.to_string(),
         });
 
         // Recurse into children if expanded
         if node.expanded {
+            let is_array = matches!(node.value, JsonValue::Array);
             let child_count = node.children.len();
             for (i, &child_index) in node.children.iter().enumerate() {
                 let is_last_child = i == child_count - 1;
-                Self::flatten_node(tree, child_index, rows, &child_prefix, is_last_child, false);
+                // Build child path
+                let child_path = if is_array {
+                    format!("{}[{}]", current_path, i)
+                } else if let Some(child) = tree.get_node(child_index) {
+                    let key = child.key.as_deref().unwrap_or("");
+                    if current_path.is_empty() {
+                        key.to_string()
+                    } else {
+                        format!("{}.{}", current_path, key)
+                    }
+                } else {
+                    current_path.to_string()
+                };
+                Self::flatten_node(tree, child_index, rows, &child_prefix, is_last_child, false, &child_path);
             }
         }
     }
@@ -809,8 +839,12 @@ impl App {
                         self.update(Message::OpenFileInNewWindow)
                     }
                     // Cmd/Ctrl+C: Copy selected node value to clipboard
-                    Key::Character(c) if c.as_str() == "c" && cmd_or_ctrl => {
+                    Key::Character(c) if c.as_str() == "c" && cmd_or_ctrl && !modifiers.shift() => {
                         self.update(Message::CopySelectedValue)
+                    }
+                    // Cmd/Ctrl+Shift+C: Copy selected node path to clipboard
+                    Key::Character(c) if c.as_str() == "c" && cmd_or_ctrl && modifiers.shift() => {
+                        self.update(Message::CopySelectedPath)
                     }
                     _ => Task::none()
                 }
@@ -854,6 +888,16 @@ impl App {
                         let value_string = Self::format_node_value_for_copy(tree, node_index);
                         // Use Iced's clipboard API to write
                         return clipboard::write(value_string);
+                    }
+                }
+                Task::none()
+            }
+            Message::CopySelectedPath => {
+                // Copy the selected node's path to clipboard
+                if let Some(node_index) = self.selected_node {
+                    // Find the path from flat_rows
+                    if let Some(flat_row) = self.flat_rows.iter().find(|r| r.node_index == node_index) {
+                        return clipboard::write(flat_row.path.clone());
                     }
                 }
                 Task::none()
@@ -1249,10 +1293,40 @@ impl App {
                 .map(|t| format!("Nodes: {}", t.node_count()))
                 .unwrap_or_default();
 
+            // Get selected node's path and type info
+            let path_display: String = if let Some(node_index) = self.selected_node {
+                if let Some(flat_row) = self.flat_rows.iter().find(|r| r.node_index == node_index) {
+                    // Get type info from the tree
+                    let type_info = if let Some(tree) = &self.tree {
+                        if let Some(node) = tree.get_node(node_index) {
+                            match &node.value {
+                                JsonValue::Null => "(null)".to_string(),
+                                JsonValue::Bool(_) => "(bool)".to_string(),
+                                JsonValue::Number(_) => "(number)".to_string(),
+                                JsonValue::String(_) => "(string)".to_string(),
+                                JsonValue::Array => format!("(array, {} items)", node.children.len()),
+                                JsonValue::Object => format!("(object, {} keys)", node.children.len()),
+                            }
+                        } else {
+                            String::new()
+                        }
+                    } else {
+                        String::new()
+                    };
+                    format!("{} {}", flat_row.path, type_info)
+                } else {
+                    String::new()
+                }
+            } else {
+                String::new()
+            };
+
             let status_bar = container(
                 row![
                     text(node_count).size(12).color(COLOR_BRACKET),
-                    text("  ").size(12),
+                    text("  |  ").size(12).color(COLOR_BRACKET),
+                    text(path_display).size(12).color(COLOR_KEY),
+                    Space::new().width(Length::Fill),
                     text(load_time_str).size(12).color(COLOR_BRACKET),
                 ]
             )
