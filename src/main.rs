@@ -2,7 +2,7 @@ mod parser;
 
 use iced::widget::{button, column, container, row, scrollable, text, text_input, Space};
 use iced::widget::scrollable::Viewport;
-use iced::{Element, Font, Length, Center, Fill, Color, Size, Task, window, Border, Shadow, Subscription};
+use iced::{Element, Font, Length, Center, Fill, Color, Size, Task, window, Border, Shadow, Subscription, clipboard};
 use iced::border::Radius;
 use iced::advanced::widget::{Id as WidgetId, operate};
 use iced::advanced::widget::operation::scrollable::{scroll_to, AbsoluteOffset};
@@ -22,6 +22,7 @@ const COLOR_INDICATOR: Color = Color::from_rgb(0.5, 0.5, 0.5); // Dim for expand
 const COLOR_ROW_ODD: Color = Color::from_rgba(1.0, 1.0, 1.0, 0.03); // Subtle alternating stripe
 const COLOR_SEARCH_MATCH: Color = Color::from_rgba(0.9, 0.7, 0.2, 0.3); // Yellow highlight for search matches
 const COLOR_SEARCH_CURRENT: Color = Color::from_rgba(0.9, 0.5, 0.1, 0.5); // Orange for current result
+const COLOR_SELECTED: Color = Color::from_rgba(0.3, 0.5, 0.8, 0.3); // Blue highlight for selected node
 
 // Button colors for 3D effect
 const COLOR_BTN_BG: Color = Color::from_rgb(0.28, 0.28, 0.30);
@@ -174,6 +175,8 @@ struct App {
     search_input_id: WidgetId,
     // Track current keyboard modifiers (for Shift+Enter in search input)
     current_modifiers: Modifiers,
+    // Currently selected node (for copy, path display, etc.)
+    selected_node: Option<usize>,
 }
 
 // User-configurable display preferences (for future use)
@@ -214,6 +217,7 @@ impl Default for App {
             tree_scrollable_id: WidgetId::unique(),
             search_input_id: WidgetId::unique(),
             current_modifiers: Modifiers::default(),
+            selected_node: None,
         }
     }
 }
@@ -243,6 +247,10 @@ enum Message {
     OpenFileInNewWindow,
     // File was selected for opening in new window
     FileSelectedForNewWindow(Option<PathBuf>),
+    // Select a node (for copy, path display)
+    SelectNode(usize),
+    // Copy selected node's value to clipboard
+    CopySelectedValue,
 }
 
 impl App {
@@ -443,7 +451,7 @@ impl App {
                 .style(button::text)
                 .into()
         } else {
-            // Leaf node - not clickable
+            // Leaf node - clickable to select
             // Add "─ " to complete the connector (same width as icon + space)
             let mut row_elements: Vec<Element<'a, Message>> = vec![
                 text(flat_row.prefix.clone()).font(Font::MONOSPACE).size(13).color(COLOR_BRACKET).into(),
@@ -477,17 +485,26 @@ impl App {
                     .into()
             );
 
-            row(row_elements).spacing(0).into()
+            // Wrap in button to make clickable for selection
+            button(row(row_elements).spacing(0))
+                .on_press(Message::SelectNode(flat_row.node_index))
+                .padding(0)
+                .style(button::text)
+                .into()
         };
 
-        // Determine background color based on search state and zebra striping
+        // Determine background color based on selection, search state and zebra striping
+        let is_selected = self.selected_node == Some(flat_row.node_index);
         let is_match = self.search_matches.contains(&flat_row.node_index);
         let is_current_result = self.search_result_index
             .map(|i| self.search_results.get(i) == Some(&flat_row.node_index))
             .unwrap_or(false);
 
+        // Priority: current search result > selected > search match > zebra stripe
         let background_color = if is_current_result {
             Some(COLOR_SEARCH_CURRENT)
+        } else if is_selected {
+            Some(COLOR_SELECTED)
         } else if is_match {
             Some(COLOR_SEARCH_MATCH)
         } else if flat_row.row_index % 2 == 1 {
@@ -643,6 +660,8 @@ impl App {
                 }
             }
             Message::ToggleNode(index) => {
+                // Also select the node when toggling
+                self.selected_node = Some(index);
                 if let Some(tree) = &mut self.tree {
                     tree.toggle_expanded(index);
                     // Rebuild flat_rows after toggle
@@ -789,6 +808,10 @@ impl App {
                     Key::Character(c) if c.as_str() == "n" && cmd_or_ctrl => {
                         self.update(Message::OpenFileInNewWindow)
                     }
+                    // Cmd/Ctrl+C: Copy selected node value to clipboard
+                    Key::Character(c) if c.as_str() == "c" && cmd_or_ctrl => {
+                        self.update(Message::CopySelectedValue)
+                    }
                     _ => Task::none()
                 }
             }
@@ -814,6 +837,79 @@ impl App {
                 }
                 Task::none()
             }
+            Message::SelectNode(node_index) => {
+                // Select the node (toggle if already selected)
+                if self.selected_node == Some(node_index) {
+                    self.selected_node = None;
+                } else {
+                    self.selected_node = Some(node_index);
+                }
+                Task::none()
+            }
+            Message::CopySelectedValue => {
+                // Copy the selected node's value to clipboard
+                if let (Some(tree), Some(node_index)) = (&self.tree, self.selected_node) {
+                    if tree.get_node(node_index).is_some() {
+                        // Format the value for clipboard
+                        let value_string = Self::format_node_value_for_copy(tree, node_index);
+                        // Use Iced's clipboard API to write
+                        return clipboard::write(value_string);
+                    }
+                }
+                Task::none()
+            }
+        }
+    }
+
+    /// Format a node's value for copying to clipboard
+    /// For primitives: just the value
+    /// For objects/arrays: JSON representation
+    fn format_node_value_for_copy(tree: &JsonTree, node_index: usize) -> String {
+        if let Some(node) = tree.get_node(node_index) {
+            match &node.value {
+                JsonValue::Null => "null".to_string(),
+                JsonValue::Bool(b) => b.to_string(),
+                JsonValue::Number(n) => n.to_string(),
+                JsonValue::String(s) => s.clone(),
+                JsonValue::Array | JsonValue::Object => {
+                    // For containers, rebuild the JSON structure
+                    Self::node_to_json_string(tree, node_index)
+                }
+            }
+        } else {
+            String::new()
+        }
+    }
+
+    /// Convert a node and its children to a JSON string
+    fn node_to_json_string(tree: &JsonTree, node_index: usize) -> String {
+        if let Some(node) = tree.get_node(node_index) {
+            match &node.value {
+                JsonValue::Null => "null".to_string(),
+                JsonValue::Bool(b) => b.to_string(),
+                JsonValue::Number(n) => n.to_string(),
+                JsonValue::String(s) => format!("\"{}\"", s.replace('\\', "\\\\").replace('"', "\\\"")),
+                JsonValue::Array => {
+                    let items: Vec<String> = node.children.iter()
+                        .map(|&child_idx| Self::node_to_json_string(tree, child_idx))
+                        .collect();
+                    format!("[{}]", items.join(", "))
+                }
+                JsonValue::Object => {
+                    let items: Vec<String> = node.children.iter()
+                        .filter_map(|&child_idx| {
+                            tree.get_node(child_idx).map(|child| {
+                                let key = child.key.as_deref().unwrap_or("");
+                                let value = Self::node_to_json_string(tree, child_idx);
+                                format!("\"{}\": {}", key, value)
+                            })
+                        })
+                        .collect();
+                    format!("{{{}}}", items.join(", "))
+                }
+            }
+        } else {
+            String::new()
         }
     }
 
