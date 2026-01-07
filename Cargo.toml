@@ -2,6 +2,9 @@
 name = "unfold"
 version = "0.1.0"
 edition = "2024"
+description = "A high-performance JSON viewer"
+authors = ["Mauricio Mercado"]
+license = "MIT"
 
 [dependencies]
 iced = { version = "0.14.0", features = ["tokio", "advanced"] }
@@ -9,3 +12,13 @@ rfd = "0.16.0"
 regex = "1.11"
 serde = { version = "1.0.228", features = ["derive"] }
 serde_json = "1.0.145"
+
+[package.metadata.bundle]
+name = "Unfold"
+identifier = "com.codigo.unfold"
+icon = ["assets/icon.icns"]
+version = "0.1.0"
+short_description = "A high-performance JSON viewer"
+long_description = "Unfold is a fast, native JSON viewer built in Rust. Features include syntax highlighting, search with regex support, keyboard shortcuts, and efficient handling of large files."
+category = "Developer Tool"
+copyright = "Copyright (c) 2025 Mauricio Mercado"

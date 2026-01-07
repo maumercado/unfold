@@ -8,7 +8,10 @@ A high-performance JSON viewer built in Rust with the Iced GUI framework.
 - **Tree View**: Expand/collapse nodes with Dadroit-style alignment
 - **Syntax Highlighting**: Color-coded keys, strings, numbers, booleans, null
 - **Search**: Text and RegEx search with case-sensitivity toggle
+- **Copy Values**: Click any node to copy its value and see its JSON path
+- **Dark/Light Theme**: Toggle between dark and light modes
 - **Keyboard Shortcuts**: Navigate efficiently without touching the mouse
+- **Better Errors**: Parse errors show line numbers for easy debugging
 
 ## Screenshot
 
@@ -16,15 +19,23 @@ A high-performance JSON viewer built in Rust with the Iced GUI framework.
 
 ## Installation
 
+### macOS
+
+Download the latest `.dmg` from [Releases](https://github.com/maumercado/unfold/releases), open it, and drag Unfold to your Applications folder.
+
 ### From Source
 
 ```bash
 # Clone the repository
-git clone https://github.com/yourusername/unfold.git
+git clone https://github.com/maumercado/unfold.git
 cd unfold
 
 # Build and run
 cargo run --release
+
+# Or create a macOS .app bundle
+cargo install cargo-bundle
+cargo bundle --release
 ```
 
 ### Requirements
@@ -36,14 +47,20 @@ cargo run --release
 
 ### Opening Files
 
-- Click "Open File..." on the welcome screen, or
+- Click "Open File" on the welcome screen, or
 - Press `Cmd+O` (macOS) / `Ctrl+O` (Windows/Linux)
+- Pass a file path as a command-line argument
 
 ### Navigation
 
 - Click nodes to expand/collapse
 - Scroll to navigate large files
 - Use search to find specific values
+
+### Copy & Path
+
+- Click any value to copy it to clipboard
+- The status bar shows the JSON path (e.g., `root.users[2].email`)
 
 ### Search
 
@@ -52,7 +69,12 @@ cargo run --release
 3. Press `Enter` for next result, `Shift+Enter` for previous
 4. Toggle options:
    - **Aa** - Case-sensitive search
-   - **.\*** - RegEx search
+   - **.*** - RegEx search
+
+### Theme
+
+- Press `Cmd+T` (macOS) / `Ctrl+T` (Windows/Linux) to toggle dark/light mode
+- Or click the theme button in the toolbar
 
 ### Keyboard Shortcuts
 
@@ -60,6 +82,8 @@ cargo run --release
 |----------|--------|
 | `Cmd/Ctrl+O` | Open file |
 | `Cmd/Ctrl+F` | Focus search |
+| `Cmd/Ctrl+T` | Toggle theme |
+| `Cmd/Ctrl+N` | New window |
 | `Enter` | Next search result |
 | `Shift+Enter` | Previous search result |
 | `Escape` | Clear search |
@@ -72,6 +96,9 @@ cargo run --release
 # Run in development mode
 cargo run
 
+# Run with a specific file
+cargo run -- path/to/file.json
+
 # Run tests
 cargo test
 
@@ -80,24 +107,26 @@ cargo fmt
 
 # Lint
 cargo clippy
+
+# Create macOS .app bundle
+cargo bundle --release
 ```
 
-## Roadmap
+## Version History
 
-### Current (v0.1.0)
+### v1.0.0
 
 - [x] Tree view with expand/collapse
-- [x] Virtual scrolling
+- [x] Virtual scrolling for large files
 - [x] Syntax highlighting
 - [x] Text and RegEx search
 - [x] Keyboard shortcuts
-
-### Planned (v1.0)
-
-- [ ] Copy node value to clipboard
-- [ ] Show JSON path on selection
-- [ ] Dark/light theme toggle
-- [ ] Multiple file tabs
+- [x] Copy node value to clipboard
+- [x] Show JSON path on click
+- [x] Dark/light theme toggle
+- [x] Better error messages with line numbers
+- [x] CLI argument support
+- [x] New window command
 
 ### Future
 
