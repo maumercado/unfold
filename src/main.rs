@@ -1,8 +1,8 @@
 mod parser;
 
-use iced::widget::{button, column, container, row, scrollable, text, text_input, Space};
+use iced::widget::{button, column, container, mouse_area, row, scrollable, stack, text, text_input, Space};
 use iced::widget::scrollable::Viewport;
-use iced::{Element, Font, Length, Center, Fill, Color, Size, Task, window, Border, Shadow, Subscription, clipboard};
+use iced::{Element, Font, Length, Center, Fill, Color, Size, Task, window, Border, Shadow, Subscription, clipboard, Theme, event, Event};
 use iced::border::Radius;
 use iced::advanced::widget::{Id as WidgetId, operate};
 use iced::advanced::widget::operation::scrollable::{scroll_to, AbsoluteOffset};
@@ -10,6 +10,228 @@ use iced::advanced::widget::operation::focusable;
 use iced::keyboard::{self, Key, Modifiers, key::Named};
 use std::collections::HashSet;
 use regex::Regex;
+use serde::Deserialize;
+use semver::Version;
+
+// Native menu support
+use muda::{
+    Menu, Submenu, MenuItem, PredefinedMenuItem, MenuEvent,
+    accelerator::{Accelerator, Modifiers as MudaModifiers, Code},
+    AboutMetadata,
+};
+
+/// Menu item identifiers for handling events
+mod menu_ids {
+    // Menu bar items
+    pub const CHECK_UPDATES: &str = "check_updates";
+    pub const OPEN_FILE: &str = "open_file";
+    pub const OPEN_NEW_WINDOW: &str = "open_new_window";
+    pub const OPEN_EXTERNAL: &str = "open_external";
+    pub const COPY_VALUE: &str = "copy_value";
+    pub const COPY_KEY: &str = "copy_key";
+    pub const COPY_PATH: &str = "copy_path";
+    pub const TOGGLE_THEME: &str = "toggle_theme";
+    pub const KEYBOARD_SHORTCUTS: &str = "keyboard_shortcuts";
+    // Context menu items
+    pub const EXPORT_JSON: &str = "export_json";
+    pub const EXPAND_ALL: &str = "expand_all";
+    pub const COLLAPSE_ALL: &str = "collapse_all";
+}
+
+/// State for the update check dialog
+#[derive(Debug, Clone, PartialEq)]
+pub enum UpdateCheckState {
+    /// Not checking, dialog not shown
+    None,
+    /// Currently fetching from GitHub
+    Checking,
+    /// Update available with version string and release URL
+    UpdateAvailable { version: String, release_url: String },
+    /// Already on latest version
+    UpToDate,
+    /// Error occurred during check
+    Error(String),
+}
+
+/// GitHub release API response (partial)
+#[derive(Debug, Deserialize)]
+struct GitHubRelease {
+    tag_name: String,
+    html_url: String,
+}
+
+/// Create the native application menu bar
+fn create_app_menu() -> Menu {
+    let menu = Menu::new();
+
+    // ===== App Menu (macOS) =====
+    #[cfg(target_os = "macos")]
+    {
+        let app_menu = Submenu::new("Unfold", true);
+        let _ = app_menu.append_items(&[
+            &PredefinedMenuItem::about(None, Some(AboutMetadata {
+                name: Some("Unfold".into()),
+                version: Some(env!("CARGO_PKG_VERSION").into()),
+                copyright: Some("Copyright 2025 Mauricio Mercado".into()),
+                ..Default::default()
+            })),
+            &PredefinedMenuItem::separator(),
+            &MenuItem::with_id(
+                menu_ids::CHECK_UPDATES,
+                "Check for Updates...",
+                true,
+                None::<Accelerator>,
+            ),
+            &PredefinedMenuItem::separator(),
+            &PredefinedMenuItem::services(None),
+            &PredefinedMenuItem::separator(),
+            &PredefinedMenuItem::hide(None),
+            &PredefinedMenuItem::hide_others(None),
+            &PredefinedMenuItem::show_all(None),
+            &PredefinedMenuItem::separator(),
+            &PredefinedMenuItem::quit(None),
+        ]);
+        let _ = menu.append(&app_menu);
+    }
+
+    // ===== File Menu =====
+    let file_menu = Submenu::new("File", true);
+    let _ = file_menu.append_items(&[
+        &MenuItem::with_id(
+            menu_ids::OPEN_FILE,
+            "Open...",
+            true,
+            Some(Accelerator::new(Some(MudaModifiers::SUPER), Code::KeyO)),
+        ),
+        &MenuItem::with_id(
+            menu_ids::OPEN_NEW_WINDOW,
+            "Open in New Window...",
+            true,
+            Some(Accelerator::new(Some(MudaModifiers::SUPER), Code::KeyN)),
+        ),
+        &PredefinedMenuItem::separator(),
+        &MenuItem::with_id(
+            menu_ids::OPEN_EXTERNAL,
+            "Open in External Editor",
+            true,
+            Some(Accelerator::new(Some(MudaModifiers::SUPER | MudaModifiers::SHIFT), Code::KeyE)),
+        ),
+        &PredefinedMenuItem::separator(),
+        &PredefinedMenuItem::close_window(None),
+    ]);
+    let _ = menu.append(&file_menu);
+
+    // ===== Edit Menu =====
+    let edit_menu = Submenu::new("Edit", true);
+    let _ = edit_menu.append_items(&[
+        &PredefinedMenuItem::copy(None),
+        &PredefinedMenuItem::paste(None),
+        &PredefinedMenuItem::separator(),
+        &MenuItem::with_id(
+            menu_ids::COPY_VALUE,
+            "Copy Value",
+            true,
+            Some(Accelerator::new(Some(MudaModifiers::SUPER), Code::KeyC)),
+        ),
+        &MenuItem::with_id(
+            menu_ids::COPY_KEY,
+            "Copy Key",
+            true,
+            Some(Accelerator::new(
+                Some(MudaModifiers::SUPER | MudaModifiers::SHIFT),
+                Code::KeyC,
+            )),
+        ),
+        &MenuItem::with_id(
+            menu_ids::COPY_PATH,
+            "Copy Path",
+            true,
+            Some(Accelerator::new(
+                Some(MudaModifiers::SUPER | MudaModifiers::ALT),
+                Code::KeyC,
+            )),
+        ),
+    ]);
+    let _ = menu.append(&edit_menu);
+
+    // ===== View Menu =====
+    let view_menu = Submenu::new("View", true);
+    let _ = view_menu.append_items(&[
+        &MenuItem::with_id(
+            menu_ids::TOGGLE_THEME,
+            "Toggle Theme",
+            true,
+            Some(Accelerator::new(Some(MudaModifiers::SUPER), Code::KeyT)),
+        ),
+        &PredefinedMenuItem::separator(),
+        &PredefinedMenuItem::fullscreen(None),
+    ]);
+    let _ = menu.append(&view_menu);
+
+    // ===== Window Menu (macOS) =====
+    #[cfg(target_os = "macos")]
+    {
+        let window_menu = Submenu::new("Window", true);
+        let _ = window_menu.append_items(&[
+            &PredefinedMenuItem::minimize(None),
+            &PredefinedMenuItem::maximize(None),
+            &PredefinedMenuItem::separator(),
+            &PredefinedMenuItem::bring_all_to_front(None),
+        ]);
+        let _ = menu.append(&window_menu);
+    }
+
+    // ===== Help Menu =====
+    let help_menu = Submenu::new("Help", true);
+    let _ = help_menu.append_items(&[
+        &MenuItem::with_id(
+            menu_ids::KEYBOARD_SHORTCUTS,
+            "Keyboard Shortcuts",
+            true,
+            Some(Accelerator::new(Some(MudaModifiers::SUPER), Code::Slash)),
+        ),
+    ]);
+    let _ = menu.append(&help_menu);
+
+    menu
+}
+
+/// Create context menu for right-click on nodes
+fn create_context_menu() -> Menu {
+    let menu = Menu::new();
+    let _ = menu.append_items(&[
+        &MenuItem::with_id(
+            menu_ids::COPY_VALUE,
+            "Copy Value",
+            true,
+            Some(Accelerator::new(Some(MudaModifiers::SUPER), Code::KeyC)),
+        ),
+        &MenuItem::with_id(
+            menu_ids::COPY_KEY,
+            "Copy Key",
+            true,
+            Some(Accelerator::new(
+                Some(MudaModifiers::SUPER | MudaModifiers::SHIFT),
+                Code::KeyC,
+            )),
+        ),
+        &MenuItem::with_id(
+            menu_ids::COPY_PATH,
+            "Copy Path",
+            true,
+            Some(Accelerator::new(
+                Some(MudaModifiers::SUPER | MudaModifiers::ALT),
+                Code::KeyC,
+            )),
+        ),
+        &PredefinedMenuItem::separator(),
+        &MenuItem::with_id(menu_ids::EXPORT_JSON, "Export JSON...", true, None::<Accelerator>),
+        &PredefinedMenuItem::separator(),
+        &MenuItem::with_id(menu_ids::EXPAND_ALL, "Expand All Children", true, None::<Accelerator>),
+        &MenuItem::with_id(menu_ids::COLLAPSE_ALL, "Collapse All Children", true, None::<Accelerator>),
+    ]);
+    menu
+}
 
 // Theme system
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -296,6 +518,44 @@ struct FlatRow {
     path: String,
 }
 
+// Global menu storage - must persist for app lifetime
+// Using thread_local since Menu is not Send/Sync
+thread_local! {
+    static APP_MENU: std::cell::RefCell<Option<Menu>> = std::cell::RefCell::new(None);
+    static CONTEXT_MENU: std::cell::RefCell<Option<Menu>> = std::cell::RefCell::new(None);
+    static MENU_INIT_COUNTER: std::cell::Cell<u32> = std::cell::Cell::new(0);
+}
+
+/// Initialize the native menu bar (called after a delay to ensure NSApp exists)
+/// Returns true if menu was just initialized
+fn try_initialize_menu() -> bool {
+    MENU_INIT_COUNTER.with(|counter| {
+        let count = counter.get();
+
+        // Skip first few ticks to let Iced/winit fully initialize
+        // Then initialize once on tick 3
+        if count < 3 {
+            counter.set(count + 1);
+            false
+        } else if count == 3 {
+            counter.set(count + 1);
+
+            let menu = create_app_menu();
+            #[cfg(target_os = "macos")]
+            menu.init_for_nsapp();
+
+            APP_MENU.with(|m| *m.borrow_mut() = Some(menu));
+
+            let context_menu = create_context_menu();
+            CONTEXT_MENU.with(|m| *m.borrow_mut() = Some(context_menu));
+
+            true
+        } else {
+            false
+        }
+    })
+}
+
 pub fn main() -> iced::Result {
     iced::application(App::boot, App::update, App::view)
         .window_size((900.0, 700.0))
@@ -351,6 +611,14 @@ struct App {
     selected_node: Option<usize>,
     // Parse error details (for better error display)
     parse_error: Option<ParseError>,
+    // Show help overlay with keyboard shortcuts
+    show_help: bool,
+    // Context menu state: Some((node_index, x, y)) when visible
+    context_menu_state: Option<(usize, f32, f32)>,
+    // Which submenu is currently open
+    context_submenu: ContextSubmenu,
+    // Update check state for the dialog
+    update_check_state: UpdateCheckState,
 }
 
 // User-configurable display preferences (for future use)
@@ -370,33 +638,6 @@ impl Default for Preferences {
     }
 }
 
-impl Default for App {
-    fn default() -> Self {
-        App {
-            tree: None,
-            status: String::from("No file loaded"),
-            current_file: None,
-            preferences: Preferences::default(),
-            theme: AppTheme::Dark,  // Default to dark theme
-            load_time: None,
-            flat_rows: Vec::new(),
-            viewport_height: 600.0,
-            scroll_offset: 0.0,
-            search_query: String::new(),
-            search_results: Vec::new(),
-            search_result_index: None,
-            search_matches: HashSet::new(),
-            search_case_sensitive: false,
-            search_use_regex: false,
-            search_regex_error: None,
-            tree_scrollable_id: WidgetId::unique(),
-            search_input_id: WidgetId::unique(),
-            current_modifiers: Modifiers::default(),
-            selected_node: None,
-            parse_error: None,
-        }
-    }
-}
 
 // Messages that can be sent to update the app
 // In Rust, enums can carry data - this is called "algebraic data types"
@@ -405,6 +646,7 @@ impl Default for App {
 enum Message {
     OpenFileDialog,
     FileSelected(Option<PathBuf>),
+    FileDropped(PathBuf),
     ToggleNode(usize),
     Scrolled(Viewport),
     SearchQueryChanged(String),
@@ -427,17 +669,87 @@ enum Message {
     SelectNode(usize),
     // Copy selected node's value to clipboard
     CopySelectedValue,
+    // Copy selected node's key/name to clipboard
+    CopySelectedName,
     // Copy selected node's path to clipboard
     CopySelectedPath,
     // Toggle between dark and light theme
     ToggleTheme,
+    // Show help overlay with shortcuts
+    ToggleHelp,
+    // No operation (used for menu event polling when no event)
+    NoOp,
+    // Check for updates from GitHub
+    CheckForUpdates,
+    // Result of update check
+    UpdateCheckResult(UpdateCheckState),
+    // Dismiss update dialog
+    DismissUpdateDialog,
+    // Open release URL in browser
+    OpenReleaseUrl(String),
+    // Export selected node to JSON file
+    ExportJson,
+    // Expand all children of selected node
+    ExpandAllChildren,
+    // Collapse all children of selected node
+    CollapseAllChildren,
+    // Open current file in external editor
+    OpenInExternalEditor,
+    // Show context menu at position (node_index, x, y)
+    ShowContextMenu(usize, f32, f32),
+    // Hide context menu
+    HideContextMenu,
+    // Open submenu
+    OpenSubmenu(ContextSubmenu),
+    // Copy value in specific format
+    CopyValueMinified,
+    CopyValueFormatted,
+    // Export value in specific format
+    ExportAsJson,
+    ExportAsMinifiedJson,
+    ExportAsFormattedJson,
+}
+
+/// Which submenu is currently open in context menu
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub enum ContextSubmenu {
+    None,
+    CopyValueAs,
+    ExportValueAs,
 }
 
 impl App {
     // Initialize the application (called once at startup)
     // Checks for CLI arguments: `unfold myfile.json`
     fn boot() -> (Self, Task<Message>) {
-        let app = App::default();
+        // Note: Menu is initialized in main() before Iced starts
+        let app = App {
+            tree: None,
+            status: String::from("No file loaded"),
+            current_file: None,
+            preferences: Preferences::default(),
+            theme: AppTheme::Dark,
+            load_time: None,
+            flat_rows: Vec::new(),
+            viewport_height: 600.0,
+            scroll_offset: 0.0,
+            search_query: String::new(),
+            search_results: Vec::new(),
+            search_result_index: None,
+            search_matches: HashSet::new(),
+            search_case_sensitive: false,
+            search_use_regex: false,
+            search_regex_error: None,
+            tree_scrollable_id: WidgetId::unique(),
+            search_input_id: WidgetId::unique(),
+            current_modifiers: Modifiers::default(),
+            selected_node: None,
+            parse_error: None,
+            show_help: false,
+            context_menu_state: None,
+            context_submenu: ContextSubmenu::None,
+            update_check_state: UpdateCheckState::None,
+        };
 
         // Check if a file path was passed as CLI argument
         // std::env::args() returns an iterator over command-line arguments
@@ -457,32 +769,57 @@ impl App {
         }
     }
 
-    // Subscription: Listen for keyboard events
-    // This is called continuously - Iced manages the event loop
-    //
-    // Key Rust concept: `keyboard::listen()` returns a Subscription<keyboard::Event>
-    // We use `.filter_map()` to only emit messages for events we care about.
-    // filter_map combines filter (skip some) and map (transform) in one step:
-    // - Return Some(value) to include the transformed value
-    // - Return None to skip the event entirely
+    // Subscription: Listen for keyboard and menu events
     fn subscription(&self) -> Subscription<Message> {
-        // keyboard::listen() subscribes to all keyboard events that aren't
-        // consumed by widgets (like text input). We handle KeyPressed and
-        // ModifiersChanged (to track Shift state for search input).
-        keyboard::listen().filter_map(|event| {
-            match event {
-                keyboard::Event::KeyPressed { key, modifiers, .. } => {
-                    // Handle key presses
-                    Some(Message::KeyPressed(key, modifiers))
+        // Try to initialize menu (waits a few ticks for NSApp to be ready)
+        try_initialize_menu();
+
+        // Combine keyboard, window, and menu event subscriptions
+        Subscription::batch([
+            // Keyboard events subscription
+            keyboard::listen().filter_map(|event| {
+                match event {
+                    keyboard::Event::KeyPressed { key, modifiers, .. } => {
+                        Some(Message::KeyPressed(key, modifiers))
+                    }
+                    keyboard::Event::ModifiersChanged(modifiers) => {
+                        Some(Message::ModifiersChanged(modifiers))
+                    }
+                    _ => None
                 }
-                keyboard::Event::ModifiersChanged(modifiers) => {
-                    // Track modifier state (for Shift+Enter in search input)
-                    Some(Message::ModifiersChanged(modifiers))
+            }),
+            // Window events subscription - listen for file drops
+            event::listen().filter_map(|event| {
+                if let Event::Window(window::Event::FileDropped(path)) = event {
+                    Some(Message::FileDropped(path))
+                } else {
+                    None
                 }
-                // Ignore key releases
-                _ => None
-            }
-        })
+            }),
+            // Menu events subscription - poll for native menu events every 50ms
+            iced::time::every(std::time::Duration::from_millis(50)).map(|_| {
+                // Try to receive menu event (non-blocking)
+                if let Ok(event) = MenuEvent::receiver().try_recv() {
+                    match event.id().as_ref() {
+                        id if id == menu_ids::OPEN_FILE => Message::OpenFileDialog,
+                        id if id == menu_ids::OPEN_NEW_WINDOW => Message::OpenFileInNewWindow,
+                        id if id == menu_ids::COPY_VALUE => Message::CopySelectedValue,
+                        id if id == menu_ids::COPY_KEY => Message::CopySelectedName,
+                        id if id == menu_ids::COPY_PATH => Message::CopySelectedPath,
+                        id if id == menu_ids::TOGGLE_THEME => Message::ToggleTheme,
+                        id if id == menu_ids::KEYBOARD_SHORTCUTS => Message::ToggleHelp,
+                        id if id == menu_ids::CHECK_UPDATES => Message::CheckForUpdates,
+                        id if id == menu_ids::EXPORT_JSON => Message::ExportJson,
+                        id if id == menu_ids::EXPAND_ALL => Message::ExpandAllChildren,
+                        id if id == menu_ids::COLLAPSE_ALL => Message::CollapseAllChildren,
+                        id if id == menu_ids::OPEN_EXTERNAL => Message::OpenInExternalEditor,
+                        _ => Message::NoOp, // PredefinedMenuItems handled by OS
+                    }
+                } else {
+                    Message::NoOp
+                }
+            }),
+        ])
     }
 
     /// Flatten the tree into a Vec<FlatRow> for virtual scrolling
@@ -741,7 +1078,19 @@ impl App {
             }
         };
 
-        row_container.into()
+        // Wrap in mouse_area to detect right-click for context menu
+        // Calculate approximate Y position based on row index and scroll
+        let node_index = flat_row.node_index;
+        let row_index = flat_row.row_index;
+        let toolbar_height = 60.0;  // Approximate toolbar height
+        let y_pos = toolbar_height + (row_index as f32 * ROW_HEIGHT) - self.scroll_offset + ROW_HEIGHT;
+        // Estimate depth from prefix length (each level adds ~4 chars of indent)
+        let estimated_depth = flat_row.prefix.len() / 4;
+        let x_pos = 50.0 + (estimated_depth as f32 * 15.0);
+
+        mouse_area(row_container)
+            .on_right_press(Message::ShowContextMenu(node_index, x_pos, y_pos))
+            .into()
     }
 
     // Calculate the maximum display width needed for the tree
@@ -884,6 +1233,25 @@ impl App {
                     }
                 }
             }
+            Message::FileDropped(path) => {
+                // File was dropped onto the window - check if it's a JSON file
+                let is_json = path.extension()
+                    .map(|ext| ext.to_string_lossy().to_lowercase())
+                    .map(|ext| ext == "json")
+                    .unwrap_or(false);
+
+                if is_json {
+                    // Reuse the FileSelected logic
+                    self.update(Message::FileSelected(Some(path)))
+                } else {
+                    // Not a JSON file - show error
+                    let filename = path.file_name()
+                        .map(|n| n.to_string_lossy().to_string())
+                        .unwrap_or_else(|| "unknown".to_string());
+                    self.status = format!("✗ Not a JSON file: {}", filename);
+                    Task::none()
+                }
+            }
             Message::ToggleNode(index) => {
                 // Also select the node when toggling
                 self.selected_node = Some(index);
@@ -1001,9 +1369,15 @@ impl App {
                 let cmd_or_ctrl = modifiers.command() || modifiers.control();
 
                 match key {
-                    // Escape: Clear search
+                    // Escape: Close overlays or clear search
                     Key::Named(Named::Escape) => {
-                        self.update(Message::ClearSearch)
+                        if self.show_help {
+                            self.update(Message::ToggleHelp)
+                        } else if self.context_menu_state.is_some() {
+                            self.update(Message::HideContextMenu)
+                        } else {
+                            self.update(Message::ClearSearch)
+                        }
                     }
                     // Enter: Navigate search results
                     Key::Named(Named::Enter) => {
@@ -1034,16 +1408,24 @@ impl App {
                         self.update(Message::OpenFileInNewWindow)
                     }
                     // Cmd/Ctrl+C: Copy selected node value to clipboard
-                    Key::Character(c) if c.as_str() == "c" && cmd_or_ctrl && !modifiers.shift() => {
+                    Key::Character(c) if c.as_str() == "c" && cmd_or_ctrl && !modifiers.shift() && !modifiers.alt() => {
                         self.update(Message::CopySelectedValue)
                     }
-                    // Cmd/Ctrl+Shift+C: Copy selected node path to clipboard
-                    Key::Character(c) if c.as_str() == "c" && cmd_or_ctrl && modifiers.shift() => {
+                    // Cmd/Ctrl+Shift+C: Copy selected node key/name to clipboard
+                    Key::Character(c) if c.as_str() == "c" && cmd_or_ctrl && modifiers.shift() && !modifiers.alt() => {
+                        self.update(Message::CopySelectedName)
+                    }
+                    // Cmd/Ctrl+Option+C: Copy selected node path to clipboard
+                    Key::Character(c) if c.as_str() == "c" && cmd_or_ctrl && modifiers.alt() => {
                         self.update(Message::CopySelectedPath)
                     }
                     // Cmd/Ctrl+T: Toggle theme (dark/light)
                     Key::Character(c) if c.as_str() == "t" && cmd_or_ctrl => {
                         self.update(Message::ToggleTheme)
+                    }
+                    // Cmd/Ctrl+? or Cmd/Ctrl+/: Toggle help overlay
+                    Key::Character(c) if (c.as_str() == "/" || c.as_str() == "?") && cmd_or_ctrl => {
+                        self.update(Message::ToggleHelp)
                     }
                     _ => Task::none()
                 }
@@ -1081,6 +1463,7 @@ impl App {
             }
             Message::CopySelectedValue => {
                 // Copy the selected node's value to clipboard
+                self.context_menu_state = None;  // Hide context menu
                 if let (Some(tree), Some(node_index)) = (&self.tree, self.selected_node) {
                     if tree.get_node(node_index).is_some() {
                         // Format the value for clipboard
@@ -1093,10 +1476,23 @@ impl App {
             }
             Message::CopySelectedPath => {
                 // Copy the selected node's path to clipboard
+                self.context_menu_state = None;  // Hide context menu
                 if let Some(node_index) = self.selected_node {
                     // Find the path from flat_rows
                     if let Some(flat_row) = self.flat_rows.iter().find(|r| r.node_index == node_index) {
                         return clipboard::write(flat_row.path.clone());
+                    }
+                }
+                Task::none()
+            }
+            Message::CopySelectedName => {
+                // Copy the selected node's key/name to clipboard
+                self.context_menu_state = None;  // Hide context menu
+                if let (Some(tree), Some(node_index)) = (&self.tree, self.selected_node) {
+                    if let Some(node) = tree.get_node(node_index) {
+                        if let Some(key) = &node.key {
+                            return clipboard::write(key.clone());
+                        }
                     }
                 }
                 Task::none()
@@ -1108,6 +1504,246 @@ impl App {
                     AppTheme::Light => AppTheme::Dark,
                 };
                 Task::none()
+            }
+            Message::ToggleHelp => {
+                // Toggle help overlay visibility
+                self.show_help = !self.show_help;
+                Task::none()
+            }
+            Message::NoOp => {
+                // No operation - used for menu polling when no event
+                Task::none()
+            }
+            Message::CheckForUpdates => {
+                // Show checking state immediately
+                self.update_check_state = UpdateCheckState::Checking;
+
+                // Perform async request to GitHub API
+                Task::perform(
+                    async {
+                        Self::fetch_latest_release().await
+                    },
+                    Message::UpdateCheckResult,
+                )
+            }
+            Message::UpdateCheckResult(state) => {
+                self.update_check_state = state;
+                Task::none()
+            }
+            Message::DismissUpdateDialog => {
+                self.update_check_state = UpdateCheckState::None;
+                Task::none()
+            }
+            Message::OpenReleaseUrl(url) => {
+                // Open URL in default browser
+                #[cfg(target_os = "macos")]
+                {
+                    let _ = std::process::Command::new("open")
+                        .arg(&url)
+                        .spawn();
+                }
+                #[cfg(target_os = "windows")]
+                {
+                    let _ = std::process::Command::new("cmd")
+                        .args(["/c", "start", &url])
+                        .spawn();
+                }
+                #[cfg(target_os = "linux")]
+                {
+                    let _ = std::process::Command::new("xdg-open")
+                        .arg(&url)
+                        .spawn();
+                }
+                self.update_check_state = UpdateCheckState::None;
+                Task::none()
+            }
+            Message::ExportJson => {
+                // Export selected node to JSON file
+                self.context_menu_state = None;  // Hide context menu
+                if let (Some(tree), Some(node_index)) = (&self.tree, self.selected_node) {
+                    let json_string = Self::node_to_json_string(tree, node_index);
+                    Task::perform(
+                        async move {
+                            let file_handle = rfd::AsyncFileDialog::new()
+                                .add_filter("JSON", &["json"])
+                                .set_file_name("export.json")
+                                .save_file()
+                                .await;
+                            if let Some(handle) = file_handle {
+                                let _ = std::fs::write(handle.path(), json_string);
+                            }
+                        },
+                        |_| Message::NoOp
+                    )
+                } else {
+                    Task::none()
+                }
+            }
+            Message::ExpandAllChildren => {
+                // Expand all children of selected node recursively
+                self.context_menu_state = None;  // Hide context menu
+                if let Some(node_index) = self.selected_node {
+                    if let Some(tree) = &mut self.tree {
+                        Self::set_expanded_recursive(tree, node_index, true);
+                        // Rebuild flat_rows after expanding
+                    }
+                    if let Some(tree) = &self.tree {
+                        self.flat_rows = Self::flatten_visible_nodes(tree);
+                    }
+                }
+                Task::none()
+            }
+            Message::CollapseAllChildren => {
+                // Collapse all children of selected node recursively
+                self.context_menu_state = None;  // Hide context menu
+                if let Some(node_index) = self.selected_node {
+                    if let Some(tree) = &mut self.tree {
+                        Self::set_expanded_recursive(tree, node_index, false);
+                        // Rebuild flat_rows after collapsing
+                    }
+                    if let Some(tree) = &self.tree {
+                        self.flat_rows = Self::flatten_visible_nodes(tree);
+                    }
+                }
+                Task::none()
+            }
+            Message::OpenInExternalEditor => {
+                // Open current file in system's default editor
+                if let Some(path) = &self.current_file {
+                    #[cfg(target_os = "macos")]
+                    {
+                        let _ = Command::new("open")
+                            .arg("-t")  // Open in default text editor
+                            .arg(path)
+                            .spawn();
+                    }
+                    #[cfg(target_os = "windows")]
+                    {
+                        let _ = Command::new("cmd")
+                            .args(["/C", "start", "", path.to_str().unwrap_or("")])
+                            .spawn();
+                    }
+                    #[cfg(target_os = "linux")]
+                    {
+                        let _ = Command::new("xdg-open")
+                            .arg(path)
+                            .spawn();
+                    }
+                }
+                Task::none()
+            }
+            Message::ShowContextMenu(node_index, x, y) => {
+                // Select the node and show context menu at position
+                self.selected_node = Some(node_index);
+                self.context_menu_state = Some((node_index, x, y));
+                Task::none()
+            }
+            Message::HideContextMenu => {
+                self.context_menu_state = None;
+                self.context_submenu = ContextSubmenu::None;
+                Task::none()
+            }
+            Message::OpenSubmenu(submenu) => {
+                self.context_submenu = submenu;
+                Task::none()
+            }
+            Message::CopyValueMinified => {
+                self.context_menu_state = None;
+                self.context_submenu = ContextSubmenu::None;
+                if let (Some(tree), Some(node_index)) = (&self.tree, self.selected_node) {
+                    // Use direct minified output - no spaces after colons or commas
+                    let minified = Self::node_to_json_string_minified(tree, node_index);
+                    return clipboard::write(minified);
+                }
+                Task::none()
+            }
+            Message::CopyValueFormatted => {
+                self.context_menu_state = None;
+                self.context_submenu = ContextSubmenu::None;
+                if let (Some(tree), Some(node_index)) = (&self.tree, self.selected_node) {
+                    let json = Self::node_to_json_string(tree, node_index);
+                    // Parse and re-serialize with pretty printing (indentation + newlines)
+                    if let Ok(value) = serde_json::from_str::<serde_json::Value>(&json) {
+                        if let Ok(formatted) = serde_json::to_string_pretty(&value) {
+                            return clipboard::write(formatted);
+                        }
+                    }
+                    // Fallback to regular output if parsing fails
+                    return clipboard::write(json);
+                }
+                Task::none()
+            }
+            Message::ExportAsJson => {
+                self.context_menu_state = None;
+                self.context_submenu = ContextSubmenu::None;
+                if let (Some(tree), Some(node_index)) = (&self.tree, self.selected_node) {
+                    let json_string = Self::node_to_json_string(tree, node_index);
+                    Task::perform(
+                        async move {
+                            let file_handle = rfd::AsyncFileDialog::new()
+                                .add_filter("JSON", &["json"])
+                                .set_file_name("export.json")
+                                .save_file()
+                                .await;
+                            if let Some(handle) = file_handle {
+                                let _ = std::fs::write(handle.path(), json_string);
+                            }
+                        },
+                        |_| Message::NoOp
+                    )
+                } else {
+                    Task::none()
+                }
+            }
+            Message::ExportAsMinifiedJson => {
+                self.context_menu_state = None;
+                self.context_submenu = ContextSubmenu::None;
+                if let (Some(tree), Some(node_index)) = (&self.tree, self.selected_node) {
+                    // Use direct minified output
+                    let minified = Self::node_to_json_string_minified(tree, node_index);
+                    Task::perform(
+                        async move {
+                            let file_handle = rfd::AsyncFileDialog::new()
+                                .add_filter("JSON", &["json"])
+                                .set_file_name("export.min.json")
+                                .save_file()
+                                .await;
+                            if let Some(handle) = file_handle {
+                                let _ = std::fs::write(handle.path(), minified);
+                            }
+                        },
+                        |_| Message::NoOp
+                    )
+                } else {
+                    Task::none()
+                }
+            }
+            Message::ExportAsFormattedJson => {
+                self.context_menu_state = None;
+                self.context_submenu = ContextSubmenu::None;
+                if let (Some(tree), Some(node_index)) = (&self.tree, self.selected_node) {
+                    let json = Self::node_to_json_string(tree, node_index);
+                    let formatted = if let Ok(value) = serde_json::from_str::<serde_json::Value>(&json) {
+                        serde_json::to_string_pretty(&value).unwrap_or(json)
+                    } else {
+                        json
+                    };
+                    Task::perform(
+                        async move {
+                            let file_handle = rfd::AsyncFileDialog::new()
+                                .add_filter("JSON", &["json"])
+                                .set_file_name("export.json")
+                                .save_file()
+                                .await;
+                            if let Some(handle) = file_handle {
+                                let _ = std::fs::write(handle.path(), formatted);
+                            }
+                        },
+                        |_| Message::NoOp
+                    )
+                } else {
+                    Task::none()
+                }
             }
         }
     }
@@ -1134,29 +1770,39 @@ impl App {
 
     /// Convert a node and its children to a JSON string
     fn node_to_json_string(tree: &JsonTree, node_index: usize) -> String {
+        Self::node_to_json_string_internal(tree, node_index, false)
+    }
+
+    fn node_to_json_string_minified(tree: &JsonTree, node_index: usize) -> String {
+        Self::node_to_json_string_internal(tree, node_index, true)
+    }
+
+    fn node_to_json_string_internal(tree: &JsonTree, node_index: usize, minified: bool) -> String {
+        let (sep, kv_sep) = if minified { (",", ":") } else { (", ", ": ") };
+
         if let Some(node) = tree.get_node(node_index) {
             match &node.value {
                 JsonValue::Null => "null".to_string(),
                 JsonValue::Bool(b) => b.to_string(),
                 JsonValue::Number(n) => n.to_string(),
-                JsonValue::String(s) => format!("\"{}\"", s.replace('\\', "\\\\").replace('"', "\\\"")),
+                JsonValue::String(s) => format!("\"{}\"", s.replace('\\', "\\\\").replace('"', "\\\"").replace('\n', "\\n").replace('\r', "\\r").replace('\t', "\\t")),
                 JsonValue::Array => {
                     let items: Vec<String> = node.children.iter()
-                        .map(|&child_idx| Self::node_to_json_string(tree, child_idx))
+                        .map(|&child_idx| Self::node_to_json_string_internal(tree, child_idx, minified))
                         .collect();
-                    format!("[{}]", items.join(", "))
+                    format!("[{}]", items.join(sep))
                 }
                 JsonValue::Object => {
                     let items: Vec<String> = node.children.iter()
                         .filter_map(|&child_idx| {
                             tree.get_node(child_idx).map(|child| {
                                 let key = child.key.as_deref().unwrap_or("");
-                                let value = Self::node_to_json_string(tree, child_idx);
-                                format!("\"{}\": {}", key, value)
+                                let value = Self::node_to_json_string_internal(tree, child_idx, minified);
+                                format!("\"{}\"{}{}", key, kv_sep, value)
                             })
                         })
                         .collect();
-                    format!("{{{}}}", items.join(", "))
+                    format!("{{{}}}", items.join(sep))
                 }
             }
         } else {
@@ -1172,6 +1818,62 @@ impl App {
                 cmd.arg(path);
             }
             let _ = cmd.spawn();
+        }
+    }
+
+    /// Fetch the latest release from GitHub API and compare with current version
+    async fn fetch_latest_release() -> UpdateCheckState {
+        const GITHUB_API_URL: &str = "https://api.github.com/repos/maumercado/unfold/releases/latest";
+        const CURRENT_VERSION: &str = env!("CARGO_PKG_VERSION");
+
+        // Build HTTP client with User-Agent (required by GitHub API)
+        let client = match reqwest::Client::builder()
+            .user_agent(format!("Unfold/{}", CURRENT_VERSION))
+            .build()
+        {
+            Ok(c) => c,
+            Err(e) => return UpdateCheckState::Error(format!("Failed to create HTTP client: {}", e)),
+        };
+
+        // Fetch latest release
+        let response = match client.get(GITHUB_API_URL).send().await {
+            Ok(r) => r,
+            Err(e) => return UpdateCheckState::Error(format!("Network error: {}", e)),
+        };
+
+        // Check for HTTP errors
+        if !response.status().is_success() {
+            if response.status().as_u16() == 404 {
+                return UpdateCheckState::Error("No releases found on GitHub".to_string());
+            }
+            return UpdateCheckState::Error(format!("GitHub API error: {}", response.status()));
+        }
+
+        // Parse JSON response
+        let release: GitHubRelease = match response.json().await {
+            Ok(r) => r,
+            Err(e) => return UpdateCheckState::Error(format!("Failed to parse response: {}", e)),
+        };
+
+        // Parse versions (remove leading 'v' if present)
+        let latest_version_str = release.tag_name.trim_start_matches('v');
+        let current_version = match Version::parse(CURRENT_VERSION) {
+            Ok(v) => v,
+            Err(e) => return UpdateCheckState::Error(format!("Invalid current version: {}", e)),
+        };
+        let latest_version = match Version::parse(latest_version_str) {
+            Ok(v) => v,
+            Err(e) => return UpdateCheckState::Error(format!("Invalid release version '{}': {}", latest_version_str, e)),
+        };
+
+        // Compare versions
+        if latest_version > current_version {
+            UpdateCheckState::UpdateAvailable {
+                version: release.tag_name,
+                release_url: release.html_url,
+            }
+        } else {
+            UpdateCheckState::UpToDate
         }
     }
 
@@ -1292,6 +1994,20 @@ impl App {
                 if node_index != target_index {
                     tree.set_expanded(node_index, true);
                 }
+            }
+        }
+    }
+
+    /// Recursively set expanded state for a node and all its children
+    fn set_expanded_recursive(tree: &mut JsonTree, node_index: usize, expanded: bool) {
+        // Set expanded state for this node
+        tree.set_expanded(node_index, expanded);
+
+        // Get children and recurse
+        if let Some(node) = tree.get_node(node_index) {
+            let children = node.children.clone();
+            for child_index in children {
+                Self::set_expanded_recursive(tree, child_index, expanded);
             }
         }
     }
@@ -1508,12 +2224,38 @@ impl App {
                         ..Default::default()
                     });
 
+                    // Keyboard shortcuts section
+                    let shortcuts_title = text("Keyboard Shortcuts")
+                        .size(13)
+                        .color(colors.text_secondary);
+
+                    let shortcut_style = |colors: ThemeColors| move |_theme: &Theme| text::Style {
+                        color: Some(colors.text_secondary),
+                    };
+
+                    let cmd_key = if cfg!(target_os = "macos") { "Cmd" } else { "Ctrl" };
+
+                    let opt_key = if cfg!(target_os = "macos") { "Option" } else { "Alt" };
+                    let shortcuts_list = column![
+                        text(format!("{}+O  Open file", cmd_key)).size(11).style(shortcut_style(colors)),
+                        text(format!("{}+C  Copy value", cmd_key)).size(11).style(shortcut_style(colors)),
+                        text(format!("{}+Shift+C  Copy key", cmd_key)).size(11).style(shortcut_style(colors)),
+                        text(format!("{}+{}+C  Copy path", cmd_key, opt_key)).size(11).style(shortcut_style(colors)),
+                        text(format!("{}+/  All shortcuts", cmd_key)).size(11).style(shortcut_style(colors)),
+                    ]
+                    .spacing(4)
+                    .align_x(Center);
+
                     let welcome = column![
                         welcome_text,
                         action_row,
                         new_window_link,
                         Space::new().height(Length::Fixed(20.0)),
                         theme_link,
+                        Space::new().height(Length::Fixed(30.0)),
+                        shortcuts_title,
+                        Space::new().height(Length::Fixed(8.0)),
+                        shortcuts_list,
                     ]
                     .spacing(8)
                     .align_x(Center);
@@ -1693,9 +2435,915 @@ impl App {
                     ..Default::default()
                 });
 
-            column![toolbar, tree_container, status_bar].into()
+            let main_content: Element<'_, Message> = column![toolbar, tree_container, status_bar].into();
+
+            // Show overlays: update dialog, help, or context menu
+            if self.update_check_state != UpdateCheckState::None {
+                stack![
+                    main_content,
+                    self.render_update_dialog(colors),
+                ].into()
+            } else if self.show_help {
+                stack![
+                    main_content,
+                    self.render_help_overlay(colors),
+                ].into()
+            } else if self.context_menu_state.is_some() {
+                stack![
+                    main_content,
+                    self.render_context_menu(colors),
+                ].into()
+            } else {
+                main_content
+            }
         } else {
-            tree_view  // This is the welcome screen
+            // Welcome screen - also support overlays
+            if self.update_check_state != UpdateCheckState::None {
+                stack![
+                    tree_view,
+                    self.render_update_dialog(colors),
+                ].into()
+            } else if self.show_help {
+                stack![
+                    tree_view,
+                    self.render_help_overlay(colors),
+                ].into()
+            } else {
+                tree_view
+            }
         }
+    }
+
+    /// Render the help overlay with keyboard shortcuts
+    fn render_help_overlay<'a>(&self, colors: ThemeColors) -> Element<'a, Message> {
+        let cmd_key = if cfg!(target_os = "macos") { "⌘" } else { "Ctrl+" };
+        let shift = if cfg!(target_os = "macos") { "⇧" } else { "Shift+" };
+        let opt = if cfg!(target_os = "macos") { "⌥" } else { "Alt+" };
+
+        // Helper to create a shortcut row
+        fn shortcut_row<'a>(keys: String, desc: &'static str, colors: ThemeColors) -> Element<'a, Message> {
+            row![
+                container(text(keys).size(12).font(Font::MONOSPACE).color(colors.text_primary))
+                    .width(Length::Fixed(120.0)),
+                text(desc).size(12).color(colors.text_secondary),
+            ]
+            .spacing(10)
+            .into()
+        }
+
+        let shortcuts = column![
+            text("Keyboard Shortcuts").size(16).color(colors.text_primary),
+            Space::new().height(Length::Fixed(15.0)),
+
+            text("File").size(13).color(colors.key),
+            shortcut_row(format!("{}O", cmd_key), "Open file", colors),
+            shortcut_row(format!("{}N", cmd_key), "Open in new window", colors),
+            Space::new().height(Length::Fixed(10.0)),
+
+            text("Edit").size(13).color(colors.key),
+            shortcut_row(format!("{}C", cmd_key), "Copy selected value", colors),
+            shortcut_row(format!("{}{}C", shift, cmd_key), "Copy key name", colors),
+            shortcut_row(format!("{}{}C", opt, cmd_key), "Copy node path", colors),
+            Space::new().height(Length::Fixed(10.0)),
+
+            text("Search").size(13).color(colors.key),
+            shortcut_row(format!("{}F", cmd_key), "Focus search", colors),
+            shortcut_row("Enter".to_string(), "Next result", colors),
+            shortcut_row(format!("{}Enter", shift), "Previous result", colors),
+            shortcut_row("Escape".to_string(), "Clear search", colors),
+            Space::new().height(Length::Fixed(10.0)),
+
+            text("View").size(13).color(colors.key),
+            shortcut_row(format!("{}T", cmd_key), "Toggle theme", colors),
+            shortcut_row(format!("{}/", cmd_key), "Toggle this help", colors),
+            Space::new().height(Length::Fixed(20.0)),
+
+            text("Press Escape or ⌘/ to close").size(11).color(colors.text_secondary),
+        ]
+        .spacing(4)
+        .padding(25);
+
+        let overlay_box = container(shortcuts)
+            .style(move |_theme| container::Style {
+                background: Some(colors.toolbar_bg.into()),
+                border: Border {
+                    color: colors.btn_border_top,
+                    width: 1.0,
+                    radius: Radius::from(8.0),
+                },
+                shadow: Shadow {
+                    color: Color::from_rgba(0.0, 0.0, 0.0, 0.5),
+                    offset: iced::Vector::new(0.0, 4.0),
+                    blur_radius: 20.0,
+                },
+                ..Default::default()
+            });
+
+        // Semi-transparent backdrop that closes on click
+        let backdrop = button(Space::new().width(Fill).height(Fill))
+            .on_press(Message::ToggleHelp)
+            .style(|_theme, _status| button::Style {
+                background: Some(Color::from_rgba(0.0, 0.0, 0.0, 0.5).into()),
+                ..Default::default()
+            })
+            .width(Fill)
+            .height(Fill);
+
+        stack![
+            backdrop,
+            container(overlay_box)
+                .width(Fill)
+                .height(Fill)
+                .center(Fill),
+        ].into()
+    }
+
+    /// Render the context menu overlay for right-click actions
+    fn render_context_menu<'a>(&self, colors: ThemeColors) -> Element<'a, Message> {
+        let (node_index, menu_x, menu_y) = self.context_menu_state.unwrap_or((0, 100.0, 100.0));
+        let current_submenu = self.context_submenu;
+
+        let has_children = if let Some(tree) = &self.tree {
+            tree.get_node(node_index)
+                .map(|n| !n.children.is_empty())
+                .unwrap_or(false)
+        } else {
+            false
+        };
+
+        let menu_width = 180.0;
+        let submenu_width = 150.0;
+
+        // Regular menu item - closes any open submenu on hover
+        let menu_item = |label: &'static str, msg: Message| -> Element<'a, Message> {
+            let item_button = button(
+                text(label).size(13).color(colors.text_primary)
+            )
+            .on_press(msg)
+            .padding([6, 12])
+            .width(Length::Fixed(menu_width - 8.0))
+            .style(move |_theme, status| {
+                let bg = match status {
+                    ButtonStatus::Hovered => Some(colors.selected.into()),
+                    _ => None,
+                };
+                button::Style {
+                    background: bg,
+                    text_color: colors.text_primary,
+                    border: Border {
+                        radius: Radius::from(4.0),
+                        ..Default::default()
+                    },
+                    ..Default::default()
+                }
+            });
+
+            // Close submenu when hovering over regular items
+            mouse_area(item_button)
+                .on_enter(Message::OpenSubmenu(ContextSubmenu::None))
+                .into()
+        };
+
+        // Submenu parent item with arrow - opens on hover
+        let submenu_parent = |label: &'static str, submenu: ContextSubmenu, is_open: bool| -> Element<'a, Message> {
+            let bg_color = if is_open { colors.selected } else { Color::TRANSPARENT };
+            let item_content = container(
+                row![
+                    text(label).size(13).color(colors.text_primary),
+                    Space::new().width(Length::Fill),
+                    text("›").size(14).color(colors.text_secondary),
+                ]
+            )
+            .padding([6, 12])
+            .width(Length::Fixed(menu_width - 8.0))
+            .style(move |_theme| container::Style {
+                background: Some(bg_color.into()),
+                border: Border {
+                    radius: Radius::from(4.0),
+                    ..Default::default()
+                },
+                ..Default::default()
+            });
+
+            // Use mouse_area to detect hover and open submenu
+            mouse_area(item_content)
+                .on_enter(Message::OpenSubmenu(submenu))
+                .into()
+        };
+
+        // Submenu item
+        let submenu_item = |label: &'static str, msg: Message| -> Element<'a, Message> {
+            button(
+                text(label).size(13).color(colors.text_primary)
+            )
+            .on_press(msg)
+            .padding([6, 12])
+            .width(Length::Fixed(submenu_width - 8.0))
+            .style(move |_theme, status| {
+                let bg = match status {
+                    ButtonStatus::Hovered => Some(colors.selected.into()),
+                    _ => None,
+                };
+                button::Style {
+                    background: bg,
+                    text_color: colors.text_primary,
+                    border: Border {
+                        radius: Radius::from(4.0),
+                        ..Default::default()
+                    },
+                    ..Default::default()
+                }
+            })
+            .into()
+        };
+
+        let separator = || -> Element<'a, Message> {
+            container(Space::new().width(Length::Fixed(menu_width - 16.0)).height(Length::Fixed(1.0)))
+                .padding([4, 4])
+                .style(move |_theme| container::Style {
+                    background: Some(colors.btn_border_bottom.into()),
+                    ..Default::default()
+                })
+                .into()
+        };
+
+        let mut menu_items: Vec<Element<'a, Message>> = vec![
+            menu_item("Copy Key", Message::CopySelectedName),
+            menu_item("Copy Value", Message::CopySelectedValue),
+            submenu_parent("Copy Value As", ContextSubmenu::CopyValueAs, current_submenu == ContextSubmenu::CopyValueAs),
+            menu_item("Copy Path", Message::CopySelectedPath),
+            separator(),
+            submenu_parent("Export Value As", ContextSubmenu::ExportValueAs, current_submenu == ContextSubmenu::ExportValueAs),
+        ];
+
+        // Only show expand/collapse if node has children
+        if has_children {
+            menu_items.push(separator());
+            menu_items.push(menu_item("Expand All Children", Message::ExpandAllChildren));
+            menu_items.push(menu_item("Collapse All Children", Message::CollapseAllChildren));
+        }
+
+        let menu_content = column(menu_items)
+            .spacing(0)
+            .padding(4);
+
+        let menu_box = container(menu_content)
+            .style(move |_theme| container::Style {
+                background: Some(colors.toolbar_bg.into()),
+                border: Border {
+                    color: colors.btn_border_top,
+                    width: 1.0,
+                    radius: Radius::from(6.0),
+                },
+                shadow: Shadow {
+                    color: Color::from_rgba(0.0, 0.0, 0.0, 0.4),
+                    offset: iced::Vector::new(0.0, 2.0),
+                    blur_radius: 10.0,
+                },
+                ..Default::default()
+            });
+
+        // Build submenu if one is open
+        let submenu_box: Option<Element<'a, Message>> = match current_submenu {
+            ContextSubmenu::CopyValueAs => {
+                let submenu_content = column![
+                    submenu_item("Minified", Message::CopyValueMinified),
+                    submenu_item("Formatted", Message::CopyValueFormatted),
+                ]
+                .spacing(0)
+                .padding(4);
+
+                Some(container(submenu_content)
+                    .style(move |_theme| container::Style {
+                        background: Some(colors.toolbar_bg.into()),
+                        border: Border {
+                            color: colors.btn_border_top,
+                            width: 1.0,
+                            radius: Radius::from(6.0),
+                        },
+                        shadow: Shadow {
+                            color: Color::from_rgba(0.0, 0.0, 0.0, 0.4),
+                            offset: iced::Vector::new(0.0, 2.0),
+                            blur_radius: 10.0,
+                        },
+                        ..Default::default()
+                    })
+                    .into())
+            }
+            ContextSubmenu::ExportValueAs => {
+                let submenu_content = column![
+                    submenu_item("JSON", Message::ExportAsJson),
+                    submenu_item("Minified JSON", Message::ExportAsMinifiedJson),
+                    submenu_item("Formatted JSON", Message::ExportAsFormattedJson),
+                ]
+                .spacing(0)
+                .padding(4);
+
+                Some(container(submenu_content)
+                    .style(move |_theme| container::Style {
+                        background: Some(colors.toolbar_bg.into()),
+                        border: Border {
+                            color: colors.btn_border_top,
+                            width: 1.0,
+                            radius: Radius::from(6.0),
+                        },
+                        shadow: Shadow {
+                            color: Color::from_rgba(0.0, 0.0, 0.0, 0.4),
+                            offset: iced::Vector::new(0.0, 2.0),
+                            blur_radius: 10.0,
+                        },
+                        ..Default::default()
+                    })
+                    .into())
+            }
+            ContextSubmenu::None => None,
+        };
+
+        // Transparent backdrop that closes context menu on click anywhere
+        let backdrop = mouse_area(Space::new().width(Fill).height(Fill))
+            .on_press(Message::HideContextMenu);
+
+        // Position menu at cursor location
+        let clamped_x = menu_x.max(10.0);
+        let clamped_y = menu_y.max(10.0);
+
+        // Calculate submenu vertical offset based on which submenu is open
+        let submenu_y_offset = match current_submenu {
+            ContextSubmenu::CopyValueAs => 2.0 * 31.0,  // After 2 items (Copy Name, Copy Value)
+            ContextSubmenu::ExportValueAs => 5.0 * 31.0,  // After separator and more items
+            ContextSubmenu::None => 0.0,
+        };
+
+        // Build menu with optional submenu
+        let menu_row: Element<'a, Message> = if let Some(submenu) = submenu_box {
+            row![
+                Space::new().width(Length::Fixed(clamped_x)),
+                menu_box,
+                Space::new().width(Length::Fixed(4.0)),
+                column![
+                    Space::new().height(Length::Fixed(submenu_y_offset)),
+                    submenu,
+                ]
+            ].into()
+        } else {
+            row![
+                Space::new().width(Length::Fixed(clamped_x)),
+                menu_box,
+            ].into()
+        };
+
+        stack![
+            backdrop,
+            column![
+                Space::new().height(Length::Fixed(clamped_y)),
+                menu_row,
+            ]
+        ].into()
+    }
+
+    /// Render the update check dialog overlay
+    fn render_update_dialog(&self, colors: ThemeColors) -> Element<'_, Message> {
+        let content: Element<'_, Message> = match &self.update_check_state {
+            UpdateCheckState::Checking => {
+                column![
+                    text("Checking for Updates").size(16).color(colors.text_primary),
+                    Space::new().height(Length::Fixed(15.0)),
+                    text("Contacting GitHub...").size(13).color(colors.text_secondary),
+                    Space::new().height(Length::Fixed(20.0)),
+                ]
+                .spacing(4)
+                .padding(25)
+                .into()
+            }
+            UpdateCheckState::UpToDate => {
+                let current_version = env!("CARGO_PKG_VERSION");
+                column![
+                    text("You're Up to Date").size(16).color(colors.text_primary),
+                    Space::new().height(Length::Fixed(15.0)),
+                    text(format!("Unfold {} is the latest version.", current_version))
+                        .size(13)
+                        .color(colors.text_secondary),
+                    Space::new().height(Length::Fixed(20.0)),
+                    button(
+                        text("OK").size(13).color(colors.text_primary)
+                    )
+                    .on_press(Message::DismissUpdateDialog)
+                    .padding([8, 20])
+                    .style(move |_theme, status| {
+                        let bg = match status {
+                            ButtonStatus::Hovered => colors.selected,
+                            _ => colors.btn_border_top,
+                        };
+                        button::Style {
+                            background: Some(bg.into()),
+                            text_color: colors.text_primary,
+                            border: Border {
+                                radius: Radius::from(6.0),
+                                ..Default::default()
+                            },
+                            ..Default::default()
+                        }
+                    }),
+                ]
+                .spacing(4)
+                .padding(25)
+                .align_x(iced::Alignment::Center)
+                .into()
+            }
+            UpdateCheckState::UpdateAvailable { version, release_url } => {
+                let url = release_url.clone();
+                column![
+                    text("Update Available").size(16).color(colors.text_primary),
+                    Space::new().height(Length::Fixed(15.0)),
+                    text(format!("A new version ({}) is available!", version))
+                        .size(13)
+                        .color(colors.text_secondary),
+                    Space::new().height(Length::Fixed(20.0)),
+                    row![
+                        button(
+                            text("Download").size(13)
+                        )
+                        .on_press(Message::OpenReleaseUrl(url))
+                        .padding([8, 16])
+                        .style(move |_theme, status| {
+                            let bg = match status {
+                                ButtonStatus::Hovered => Color::from_rgb(0.2, 0.6, 0.3),
+                                _ => Color::from_rgb(0.2, 0.5, 0.2),
+                            };
+                            button::Style {
+                                background: Some(bg.into()),
+                                text_color: Color::WHITE,
+                                border: Border {
+                                    radius: Radius::from(6.0),
+                                    ..Default::default()
+                                },
+                                ..Default::default()
+                            }
+                        }),
+                        Space::new().width(Length::Fixed(10.0)),
+                        button(
+                            text("Later").size(13).color(colors.text_secondary)
+                        )
+                        .on_press(Message::DismissUpdateDialog)
+                        .padding([8, 16])
+                        .style(move |_theme, status| {
+                            let bg = match status {
+                                ButtonStatus::Hovered => Some(colors.selected.into()),
+                                _ => None,
+                            };
+                            button::Style {
+                                background: bg,
+                                text_color: colors.text_secondary,
+                                border: Border {
+                                    radius: Radius::from(6.0),
+                                    color: colors.btn_border_top,
+                                    width: 1.0,
+                                },
+                                ..Default::default()
+                            }
+                        }),
+                    ]
+                ]
+                .spacing(4)
+                .padding(25)
+                .align_x(iced::Alignment::Center)
+                .into()
+            }
+            UpdateCheckState::Error(msg) => {
+                column![
+                    text("Update Check Failed").size(16).color(colors.text_primary),
+                    Space::new().height(Length::Fixed(15.0)),
+                    text(msg).size(13).color(Color::from_rgb(0.9, 0.3, 0.3)),
+                    Space::new().height(Length::Fixed(20.0)),
+                    button(
+                        text("OK").size(13).color(colors.text_primary)
+                    )
+                    .on_press(Message::DismissUpdateDialog)
+                    .padding([8, 20])
+                    .style(move |_theme, status| {
+                        let bg = match status {
+                            ButtonStatus::Hovered => colors.selected,
+                            _ => colors.btn_border_top,
+                        };
+                        button::Style {
+                            background: Some(bg.into()),
+                            text_color: colors.text_primary,
+                            border: Border {
+                                radius: Radius::from(6.0),
+                                ..Default::default()
+                            },
+                            ..Default::default()
+                        }
+                    }),
+                ]
+                .spacing(4)
+                .padding(25)
+                .align_x(iced::Alignment::Center)
+                .into()
+            }
+            UpdateCheckState::None => {
+                // Should not be rendered, but handle gracefully
+                Space::new().into()
+            }
+        };
+
+        let overlay_box = container(content)
+            .style(move |_theme| container::Style {
+                background: Some(colors.toolbar_bg.into()),
+                border: Border {
+                    color: colors.btn_border_top,
+                    width: 1.0,
+                    radius: Radius::from(8.0),
+                },
+                shadow: Shadow {
+                    color: Color::from_rgba(0.0, 0.0, 0.0, 0.5),
+                    offset: iced::Vector::new(0.0, 4.0),
+                    blur_radius: 20.0,
+                },
+                ..Default::default()
+            });
+
+        // Semi-transparent backdrop that closes on click (only if not checking)
+        let backdrop = button(Space::new().width(Fill).height(Fill))
+            .on_press_maybe(
+                if self.update_check_state == UpdateCheckState::Checking {
+                    None
+                } else {
+                    Some(Message::DismissUpdateDialog)
+                }
+            )
+            .style(|_theme, _status| button::Style {
+                background: Some(Color::from_rgba(0.0, 0.0, 0.0, 0.5).into()),
+                ..Default::default()
+            })
+            .width(Fill)
+            .height(Fill);
+
+        stack![
+            backdrop,
+            container(overlay_box)
+                .width(Fill)
+                .height(Fill)
+                .center(Fill),
+        ].into()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::parser::builder::build_tree;
+    use serde_json::json;
+
+    #[test]
+    fn test_menu_ids_are_unique() {
+        // Ensure all menu IDs are distinct
+        let ids = vec![
+            menu_ids::CHECK_UPDATES,
+            menu_ids::OPEN_FILE,
+            menu_ids::OPEN_NEW_WINDOW,
+            menu_ids::COPY_VALUE,
+            menu_ids::COPY_KEY,
+            menu_ids::COPY_PATH,
+            menu_ids::TOGGLE_THEME,
+            menu_ids::KEYBOARD_SHORTCUTS,
+            menu_ids::EXPORT_JSON,
+            menu_ids::EXPAND_ALL,
+            menu_ids::COLLAPSE_ALL,
+        ];
+
+        let unique: std::collections::HashSet<_> = ids.iter().collect();
+        assert_eq!(ids.len(), unique.len(), "Menu IDs must be unique");
+    }
+
+    #[test]
+    fn test_set_expanded_recursive() {
+        // Create a tree with nested objects
+        let value = json!({
+            "level1": {
+                "level2": {
+                    "level3": "value"
+                }
+            }
+        });
+        let mut tree = build_tree(&value);
+
+        // Get root index before mutably borrowing
+        let root_index = tree.root_index();
+
+        // Initially all nodes should be collapsed (expanded = false)
+        // Expand all recursively from root
+        App::set_expanded_recursive(&mut tree, root_index, true);
+
+        // Check that expandable nodes are now expanded
+        for i in 0..tree.node_count() {
+            if let Some(node) = tree.get_node(i) {
+                if node.is_expandable() {
+                    assert!(node.expanded, "Node {} should be expanded", i);
+                }
+            }
+        }
+
+        // Collapse all recursively
+        App::set_expanded_recursive(&mut tree, root_index, false);
+
+        // Check that all nodes are collapsed
+        for i in 0..tree.node_count() {
+            if let Some(node) = tree.get_node(i) {
+                if node.is_expandable() {
+                    assert!(!node.expanded, "Node {} should be collapsed", i);
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn test_node_to_json_string_primitives() {
+        // Test primitive value serialization
+        let value = json!({"str": "hello", "num": 42, "bool": true, "null": null});
+        let tree = build_tree(&value);
+
+        // Get root node and test children
+        if let Some(root) = tree.get_node(tree.root_index()) {
+            for &child_idx in &root.children {
+                let json_str = App::node_to_json_string(&tree, child_idx);
+                // Each child is a key-value pair, so we can verify it's valid JSON-ish
+                assert!(!json_str.is_empty());
+            }
+        }
+    }
+
+    #[test]
+    fn test_node_to_json_string_nested() {
+        // Test nested object serialization
+        let value = json!({"nested": {"key": "value"}});
+        let tree = build_tree(&value);
+
+        let json_str = App::node_to_json_string(&tree, tree.root_index());
+        // Should contain the nested structure
+        assert!(json_str.contains("nested"));
+        assert!(json_str.contains("key"));
+        assert!(json_str.contains("value"));
+    }
+
+    #[test]
+    fn test_flatten_visible_nodes() {
+        // Create a simple tree
+        let value = json!({"a": 1, "b": 2});
+        let tree = build_tree(&value);
+
+        let flat_rows = App::flatten_visible_nodes(&tree);
+
+        // Should have at least the root's children visible
+        // (root is usually skipped, children shown)
+        assert!(!flat_rows.is_empty());
+    }
+
+    #[test]
+    fn test_search_nodes_basic() {
+        let value = json!({"name": "Unfold", "version": "1.0"});
+        let tree = build_tree(&value);
+
+        // Search for "Unfold"
+        let (results, error) = App::search_nodes(&tree, "Unfold", false, false);
+        assert!(error.is_none());
+        assert!(!results.is_empty(), "Should find 'Unfold'");
+
+        // Search for non-existent
+        let (results, error) = App::search_nodes(&tree, "nonexistent", false, false);
+        assert!(error.is_none());
+        assert!(results.is_empty());
+    }
+
+    #[test]
+    fn test_search_nodes_case_sensitive() {
+        let value = json!({"Name": "Test"});
+        let tree = build_tree(&value);
+
+        // Case insensitive should find it
+        let (results, _) = App::search_nodes(&tree, "name", false, false);
+        assert!(!results.is_empty());
+
+        // Case sensitive should not find lowercase
+        let (results, _) = App::search_nodes(&tree, "name", true, false);
+        assert!(results.is_empty());
+
+        // Case sensitive should find exact match
+        let (results, _) = App::search_nodes(&tree, "Name", true, false);
+        assert!(!results.is_empty());
+    }
+
+    #[test]
+    fn test_search_nodes_regex() {
+        let value = json!({"email": "test@example.com"});
+        let tree = build_tree(&value);
+
+        // Regex search for email pattern
+        let (results, error) = App::search_nodes(&tree, r".*@.*\.com", false, true);
+        assert!(error.is_none());
+        assert!(!results.is_empty());
+
+        // Invalid regex should return error
+        let (results, error) = App::search_nodes(&tree, r"[invalid", false, true);
+        assert!(error.is_some());
+        assert!(results.is_empty());
+    }
+
+    #[test]
+    fn test_theme_colors() {
+        // Test that theme colors are valid
+        let dark = get_theme_colors(AppTheme::Dark);
+        let light = get_theme_colors(AppTheme::Light);
+
+        // Colors should be different between themes
+        assert_ne!(dark.background, light.background);
+        assert_ne!(dark.text_primary, light.text_primary);
+    }
+
+    // ===== Context Menu Tests =====
+
+    #[test]
+    fn test_context_submenu_enum() {
+        // Test that ContextSubmenu values are distinct and comparable
+        assert_eq!(ContextSubmenu::None, ContextSubmenu::None);
+        assert_ne!(ContextSubmenu::None, ContextSubmenu::CopyValueAs);
+        assert_ne!(ContextSubmenu::CopyValueAs, ContextSubmenu::ExportValueAs);
+    }
+
+    #[test]
+    fn test_update_check_state_enum() {
+        // Test that UpdateCheckState values are distinct and comparable
+        assert_eq!(UpdateCheckState::None, UpdateCheckState::None);
+        assert_eq!(UpdateCheckState::Checking, UpdateCheckState::Checking);
+        assert_eq!(UpdateCheckState::UpToDate, UpdateCheckState::UpToDate);
+
+        assert_ne!(UpdateCheckState::None, UpdateCheckState::Checking);
+        assert_ne!(UpdateCheckState::Checking, UpdateCheckState::UpToDate);
+
+        // Test UpdateAvailable variant
+        let update1 = UpdateCheckState::UpdateAvailable {
+            version: "v1.0.0".to_string(),
+            release_url: "https://github.com/test".to_string(),
+        };
+        let update2 = UpdateCheckState::UpdateAvailable {
+            version: "v1.0.0".to_string(),
+            release_url: "https://github.com/test".to_string(),
+        };
+        assert_eq!(update1, update2);
+
+        // Test Error variant
+        let error1 = UpdateCheckState::Error("Network error".to_string());
+        let error2 = UpdateCheckState::Error("Network error".to_string());
+        assert_eq!(error1, error2);
+        assert_ne!(UpdateCheckState::Error("a".to_string()), UpdateCheckState::Error("b".to_string()));
+    }
+
+    #[test]
+    fn test_node_to_json_string_minified() {
+        // Test minified JSON output has no spaces
+        let value = json!({"key": "value", "nested": {"a": 1, "b": 2}});
+        let tree = build_tree(&value);
+
+        let minified = App::node_to_json_string_minified(&tree, tree.root_index());
+
+        // Minified should not have spaces after colons or commas
+        assert!(!minified.contains(": "), "Minified should not have ': ' (colon-space)");
+        assert!(!minified.contains(", "), "Minified should not have ', ' (comma-space)");
+
+        // But should still have colons and commas
+        assert!(minified.contains(":"), "Should contain colons");
+        assert!(minified.contains(","), "Should contain commas");
+    }
+
+    #[test]
+    fn test_node_to_json_string_regular_vs_minified() {
+        // Test that regular has spaces, minified doesn't
+        let value = json!({"a": 1, "b": 2});
+        let tree = build_tree(&value);
+
+        let regular = App::node_to_json_string(&tree, tree.root_index());
+        let minified = App::node_to_json_string_minified(&tree, tree.root_index());
+
+        // Regular should be longer due to spaces
+        assert!(regular.len() > minified.len(), "Regular should be longer than minified");
+
+        // Both should produce valid JSON structure
+        assert!(regular.starts_with('{'));
+        assert!(regular.ends_with('}'));
+        assert!(minified.starts_with('{'));
+        assert!(minified.ends_with('}'));
+    }
+
+    #[test]
+    fn test_minified_json_array() {
+        // Test minified JSON for arrays
+        let value = json!([1, 2, 3, "test"]);
+        let tree = build_tree(&value);
+
+        let minified = App::node_to_json_string_minified(&tree, tree.root_index());
+
+        // Should be compact
+        assert!(!minified.contains(", "));
+        assert!(minified.starts_with('['));
+        assert!(minified.ends_with(']'));
+    }
+
+    #[test]
+    fn test_minified_json_with_special_chars() {
+        // Test that special characters in strings are properly escaped
+        let value = json!({"text": "line1\nline2\ttab"});
+        let tree = build_tree(&value);
+
+        let minified = App::node_to_json_string_minified(&tree, tree.root_index());
+
+        // Should have escaped newline and tab
+        assert!(minified.contains("\\n"), "Should escape newlines");
+        assert!(minified.contains("\\t"), "Should escape tabs");
+    }
+
+    #[test]
+    fn test_minified_json_with_quotes() {
+        // Test that quotes in strings are properly escaped
+        let value = json!({"text": "he said \"hello\""});
+        let tree = build_tree(&value);
+
+        let minified = App::node_to_json_string_minified(&tree, tree.root_index());
+
+        // Should have escaped quotes
+        assert!(minified.contains("\\\""), "Should escape quotes");
+    }
+
+    #[test]
+    fn test_json_primitives_minified() {
+        // Test primitive values
+        let null_val = json!(null);
+        let bool_val = json!(true);
+        let num_val = json!(42);
+        let str_val = json!("hello");
+
+        let null_tree = build_tree(&null_val);
+        let bool_tree = build_tree(&bool_val);
+        let num_tree = build_tree(&num_val);
+        let str_tree = build_tree(&str_val);
+
+        assert_eq!(App::node_to_json_string_minified(&null_tree, null_tree.root_index()), "null");
+        assert_eq!(App::node_to_json_string_minified(&bool_tree, bool_tree.root_index()), "true");
+        assert_eq!(App::node_to_json_string_minified(&num_tree, num_tree.root_index()), "42");
+        assert_eq!(App::node_to_json_string_minified(&str_tree, str_tree.root_index()), "\"hello\"");
+    }
+
+    #[test]
+    fn test_format_node_value_for_copy() {
+        // Test the copy value formatting
+        let value = json!({"str": "hello", "num": 42});
+        let tree = build_tree(&value);
+
+        // Find the string child node
+        if let Some(root) = tree.get_node(tree.root_index()) {
+            for &child_idx in &root.children {
+                let copy_value = App::format_node_value_for_copy(&tree, child_idx);
+                // Should produce a non-empty string
+                assert!(!copy_value.is_empty());
+            }
+        }
+    }
+
+    #[test]
+    fn test_deeply_nested_minified() {
+        // Test deeply nested structure
+        let value = json!({
+            "level1": {
+                "level2": {
+                    "level3": {
+                        "value": [1, 2, 3]
+                    }
+                }
+            }
+        });
+        let tree = build_tree(&value);
+
+        let minified = App::node_to_json_string_minified(&tree, tree.root_index());
+
+        // Should be compact throughout all levels
+        assert!(!minified.contains(": "));
+        assert!(!minified.contains(", "));
+
+        // Should contain all the nested keys
+        assert!(minified.contains("level1"));
+        assert!(minified.contains("level2"));
+        assert!(minified.contains("level3"));
+        assert!(minified.contains("value"));
+    }
+
+    #[test]
+    fn test_empty_object_and_array() {
+        let empty_obj = json!({});
+        let empty_arr = json!([]);
+
+        let obj_tree = build_tree(&empty_obj);
+        let arr_tree = build_tree(&empty_arr);
+
+        assert_eq!(App::node_to_json_string_minified(&obj_tree, obj_tree.root_index()), "{}");
+        assert_eq!(App::node_to_json_string_minified(&arr_tree, arr_tree.root_index()), "[]");
     }
 }

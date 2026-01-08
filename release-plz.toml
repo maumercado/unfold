@@ -1,0 +1,18 @@
+# release-plz configuration
+# https://release-plz.ieni.dev/docs/config
+
+[workspace]
+# Create a single release PR for all changes
+pr_labels = ["release"]
+# Use conventional commits for changelog
+changelog_config = "cliff.toml"
+# Include commit links in changelog
+git_release_enable = true
+git_release_draft = false
+
+[[package]]
+name = "unfold"
+# Changelog file location
+changelog_path = "CHANGELOG.md"
+# Include these commit types in changelog
+changelog_include = ["feat", "fix", "perf", "refactor"]
