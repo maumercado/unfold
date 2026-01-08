@@ -55,20 +55,18 @@ impl JsonTree {
 
     /// Toggle the expanded state of a node
     pub fn toggle_expanded(&mut self, index: usize) {
-        if let Some(node) = self.nodes.get_mut(index) {
-            if node.is_expandable() {
+        if let Some(node) = self.nodes.get_mut(index)
+            && node.is_expandable() {
                 node.expanded = !node.expanded;
             }
-        }
     }
 
     /// Set the expanded state of a node explicitly
     pub fn set_expanded(&mut self, index: usize, expanded: bool) {
-        if let Some(node) = self.nodes.get_mut(index) {
-            if node.is_expandable() {
+        if let Some(node) = self.nodes.get_mut(index)
+            && node.is_expandable() {
                 node.expanded = expanded;
             }
-        }
     }
 
     /// Get the root index
