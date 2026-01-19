@@ -9,6 +9,7 @@ mod flat_row;
 mod parse_error;
 mod search;
 mod json_export;
+mod config;
 
 use iced::widget::{button, column, container, mouse_area, row, scrollable, stack, text, text_input, Space};
 use iced::{Element, Font, Length, Center, Fill, Color, Size, Task, window, Border, Shadow, Subscription, clipboard, Theme, event, Event};
@@ -33,6 +34,7 @@ use update_check::{UpdateCheckState, fetch_latest_release};
 use flat_row::{FlatRow, ValueType, ROW_HEIGHT, BUFFER_ROWS};
 use parse_error::ParseError;
 use parser::{JsonTree, JsonValue};
+use config::Config;
 
 /// Install the CLI tool by creating a symlink in /usr/local/bin
 /// Uses osascript on macOS to prompt for admin privileges
@@ -216,6 +218,8 @@ struct App {
     update_check_state: UpdateCheckState,
     /// CLI install result dialog: Some((success, message)) when showing
     cli_install_result: Option<(bool, String)>,
+    /// Persistent user configuration
+    config: Config,
 }
 
 /// User-configurable display preferences (for future use)
@@ -238,12 +242,15 @@ impl Default for Preferences {
 impl App {
     /// Initialize the application (called once at startup)
     fn boot() -> (Self, Task<Message>) {
+        // Load persistent config
+        let config = Config::load();
+
         let app = App {
             tree: None,
             status: String::from("No file loaded"),
             current_file: None,
             preferences: Preferences::default(),
-            theme: AppTheme::Dark,
+            theme: config.theme,  // Use saved theme
             load_time: None,
             flat_rows: Vec::new(),
             viewport_height: 600.0,
@@ -265,6 +272,7 @@ impl App {
             context_submenu: ContextSubmenu::None,
             update_check_state: UpdateCheckState::None,
             cli_install_result: None,
+            config,
         };
 
         // Check if a file path was passed as CLI argument
@@ -897,6 +905,9 @@ impl App {
                     AppTheme::Dark => AppTheme::Light,
                     AppTheme::Light => AppTheme::Dark,
                 };
+                // Save theme preference to config
+                self.config.theme = self.theme;
+                let _ = self.config.save();
                 Task::none()
             }
             Message::ToggleHelp => {
@@ -1119,6 +1130,9 @@ impl App {
                     Ok(msg) => {
                         self.status = format!("✓ {}", msg);
                         self.cli_install_result = Some((true, msg));
+                        // Save CLI installed status to config
+                        self.config.cli_installed = true;
+                        let _ = self.config.save();
                     }
                     Err(msg) => {
                         self.status = format!("✗ {}", msg);

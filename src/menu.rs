@@ -8,6 +8,7 @@ use muda::{
     AboutMetadata,
 };
 
+use crate::config::Config;
 use crate::message::Message;
 
 /// Menu item identifiers for handling events
@@ -41,6 +42,10 @@ thread_local! {
 pub fn create_app_menu() -> Menu {
     let menu = Menu::new();
 
+    // Load config to check if CLI is already installed
+    let config = Config::load();
+    let cli_not_installed = !config.cli_installed;
+
     // ===== App Menu (macOS) =====
     #[cfg(target_os = "macos")]
     {
@@ -62,7 +67,7 @@ pub fn create_app_menu() -> Menu {
             &MenuItem::with_id(
                 menu_ids::INSTALL_CLI,
                 "Install Command Line Tool...",
-                true,
+                cli_not_installed,
                 None::<Accelerator>,
             ),
             &PredefinedMenuItem::separator(),

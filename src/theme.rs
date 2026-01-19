@@ -6,10 +6,12 @@ use iced::widget::button;
 use iced::{Border, Color, Shadow};
 use iced::border::Radius;
 use iced::widget::button::Status as ButtonStatus;
+use serde::{Deserialize, Serialize};
 
 /// Application theme selection
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
 pub enum AppTheme {
+    #[default]
     Dark,
     Light,
 }
