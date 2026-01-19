@@ -5,6 +5,7 @@ edition = "2024"
 description = "A high-performance JSON viewer"
 authors = ["Mauricio Mercado"]
 license = "MIT"
+publish = false  # This is a GUI app, not a library
 
 [dependencies]
 iced = { version = "0.14.0", features = ["tokio", "advanced"] }
