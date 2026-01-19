@@ -81,6 +81,8 @@ pub enum Message {
     InstallCLI,
     /// Result of CLI installation attempt
     InstallCLIResult(Result<String, String>),
+    /// Dismiss CLI install dialog
+    DismissCLIDialog,
 }
 
 /// Which submenu is currently open in context menu

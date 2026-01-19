@@ -24,8 +24,6 @@ use std::path::PathBuf;
 use std::time::{Duration, Instant};
 use std::env;
 use std::process::Command;
-#[cfg(unix)]
-use std::os::unix::fs::symlink;
 
 // Re-export from modules
 use theme::{AppTheme, ThemeColors, get_theme_colors, button_3d_style_themed, button_toggle_style_themed};
@@ -37,17 +35,16 @@ use parse_error::ParseError;
 use parser::{JsonTree, JsonValue};
 
 /// Install the CLI tool by creating a symlink in /usr/local/bin
-#[cfg(unix)]
+/// Uses osascript on macOS to prompt for admin privileges
+#[cfg(target_os = "macos")]
 fn install_cli_tool() -> Result<String, String> {
-    let target_path = PathBuf::from("/usr/local/bin/unfold");
+    let target_path = "/usr/local/bin/unfold";
 
     // Get the path to the current executable
     let exe_path = env::current_exe()
         .map_err(|e| format!("Failed to get executable path: {}", e))?;
 
-    // For macOS .app bundles, the executable is inside Contents/MacOS/
-    // We want to link directly to the executable
-    let source_path = exe_path.clone();
+    let source_path = exe_path.to_string_lossy();
 
     // Check if /usr/local/bin exists
     let bin_dir = PathBuf::from("/usr/local/bin");
@@ -55,24 +52,55 @@ fn install_cli_tool() -> Result<String, String> {
         return Err("Directory /usr/local/bin does not exist. Please create it first.".to_string());
     }
 
-    // Remove existing symlink if present
+    // Use osascript to run ln with admin privileges
+    // This will show the native macOS password prompt
+    let script = format!(
+        r#"do shell script "ln -sf '{}' '{}'" with administrator privileges"#,
+        source_path.replace("'", "'\\''"),
+        target_path
+    );
+
+    let output = Command::new("osascript")
+        .args(["-e", &script])
+        .output()
+        .map_err(|e| format!("Failed to run osascript: {}", e))?;
+
+    if output.status.success() {
+        Ok("CLI installed! You can now use 'unfold' from the terminal.".to_string())
+    } else {
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        if stderr.contains("User canceled") || stderr.contains("canceled") {
+            Err("Installation canceled.".to_string())
+        } else {
+            Err(format!("Failed to create symlink: {}", stderr.trim()))
+        }
+    }
+}
+
+/// Install the CLI tool on Linux (non-macOS Unix)
+#[cfg(all(unix, not(target_os = "macos")))]
+fn install_cli_tool() -> Result<String, String> {
+    use std::os::unix::fs::symlink;
+
+    let target_path = PathBuf::from("/usr/local/bin/unfold");
+    let exe_path = env::current_exe()
+        .map_err(|e| format!("Failed to get executable path: {}", e))?;
+
+    // Try direct symlink first, suggest sudo if it fails
     if target_path.exists() || target_path.is_symlink() {
-        fs::remove_file(&target_path)
-            .map_err(|e| format!("Failed to remove existing file: {}. Try: sudo rm {}", e, target_path.display()))?;
+        let _ = fs::remove_file(&target_path);
     }
 
-    // Create the symlink
-    symlink(&source_path, &target_path)
-        .map_err(|e| {
-            if e.kind() == std::io::ErrorKind::PermissionDenied {
-                format!("Permission denied. Try running: sudo ln -sf \"{}\" \"{}\"",
-                    source_path.display(), target_path.display())
-            } else {
-                format!("Failed to create symlink: {}", e)
-            }
-        })?;
-
-    Ok("CLI installed! You can now use 'unfold' from the terminal.".to_string())
+    match symlink(&exe_path, &target_path) {
+        Ok(()) => Ok("CLI installed! You can now use 'unfold' from the terminal.".to_string()),
+        Err(e) if e.kind() == std::io::ErrorKind::PermissionDenied => {
+            Err(format!(
+                "Permission denied. Run this command in terminal:\nsudo ln -sf \"{}\" \"{}\"",
+                exe_path.display(), target_path.display()
+            ))
+        }
+        Err(e) => Err(format!("Failed to create symlink: {}", e)),
+    }
 }
 
 #[cfg(not(unix))]
@@ -142,6 +170,8 @@ struct App {
     context_submenu: ContextSubmenu,
     /// Update check state for the dialog
     update_check_state: UpdateCheckState,
+    /// CLI install result dialog: Some((success, message)) when showing
+    cli_install_result: Option<(bool, String)>,
 }
 
 /// User-configurable display preferences (for future use)
@@ -190,6 +220,7 @@ impl App {
             context_menu_state: None,
             context_submenu: ContextSubmenu::None,
             update_check_state: UpdateCheckState::None,
+            cli_install_result: None,
         };
 
         // Check if a file path was passed as CLI argument
@@ -1041,9 +1072,19 @@ impl App {
             }
             Message::InstallCLIResult(result) => {
                 match result {
-                    Ok(msg) => self.status = format!("✓ {}", msg),
-                    Err(msg) => self.status = format!("✗ {}", msg),
+                    Ok(msg) => {
+                        self.status = format!("✓ {}", msg);
+                        self.cli_install_result = Some((true, msg));
+                    }
+                    Err(msg) => {
+                        self.status = format!("✗ {}", msg);
+                        self.cli_install_result = Some((false, msg));
+                    }
                 }
+                Task::none()
+            }
+            Message::DismissCLIDialog => {
+                self.cli_install_result = None;
                 Task::none()
             }
         }
@@ -1201,7 +1242,9 @@ impl App {
 
             let main_content: Element<'_, Message> = column![toolbar, tree_container, status_bar].into();
 
-            if self.update_check_state != UpdateCheckState::None {
+            if self.cli_install_result.is_some() {
+                stack![main_content, self.render_cli_install_dialog(colors)].into()
+            } else if self.update_check_state != UpdateCheckState::None {
                 stack![main_content, self.render_update_dialog(colors)].into()
             } else if self.show_help {
                 stack![main_content, self.render_help_overlay(colors)].into()
@@ -1210,6 +1253,8 @@ impl App {
             } else {
                 main_content
             }
+        } else if self.cli_install_result.is_some() {
+            stack![tree_view, self.render_cli_install_dialog(colors)].into()
         } else if self.update_check_state != UpdateCheckState::None {
             stack![tree_view, self.render_update_dialog(colors)].into()
         } else if self.show_help {
@@ -2007,6 +2052,85 @@ impl App {
                     Some(Message::DismissUpdateDialog)
                 }
             )
+            .style(|_theme, _status| button::Style {
+                background: Some(Color::from_rgba(0.0, 0.0, 0.0, 0.5).into()),
+                ..Default::default()
+            })
+            .width(Fill)
+            .height(Fill);
+
+        stack![
+            backdrop,
+            container(overlay_box)
+                .width(Fill)
+                .height(Fill)
+                .center(Fill),
+        ].into()
+    }
+
+    /// Render the CLI installation result dialog overlay
+    fn render_cli_install_dialog(&self, colors: ThemeColors) -> Element<'_, Message> {
+        let (success, message) = self.cli_install_result.as_ref().unwrap();
+
+        let title = if *success {
+            "CLI Installed"
+        } else {
+            "CLI Installation Failed"
+        };
+
+        let title_color = if *success {
+            Color::from_rgb(0.2, 0.7, 0.3)
+        } else {
+            Color::from_rgb(0.9, 0.3, 0.3)
+        };
+
+        let content: Element<'_, Message> = column![
+            text(title).size(16).color(title_color),
+            Space::new().height(Length::Fixed(15.0)),
+            text(message).size(13).color(colors.text_secondary),
+            Space::new().height(Length::Fixed(20.0)),
+            button(text("OK").size(13).color(colors.text_primary))
+                .on_press(Message::DismissCLIDialog)
+                .padding([8, 20])
+                .style(move |_theme, status| {
+                    let bg = match status {
+                        ButtonStatus::Hovered => colors.selected,
+                        _ => colors.btn_border_top,
+                    };
+                    button::Style {
+                        background: Some(bg.into()),
+                        text_color: colors.text_primary,
+                        border: Border {
+                            radius: Radius::from(6.0),
+                            ..Default::default()
+                        },
+                        ..Default::default()
+                    }
+                }),
+        ]
+        .spacing(4)
+        .padding(25)
+        .align_x(iced::Alignment::Center)
+        .into();
+
+        let overlay_box = container(content)
+            .style(move |_theme| container::Style {
+                background: Some(colors.toolbar_bg.into()),
+                border: Border {
+                    color: colors.btn_border_top,
+                    width: 1.0,
+                    radius: Radius::from(8.0),
+                },
+                shadow: Shadow {
+                    color: Color::from_rgba(0.0, 0.0, 0.0, 0.5),
+                    offset: iced::Vector::new(0.0, 4.0),
+                    blur_radius: 20.0,
+                },
+                ..Default::default()
+            });
+
+        let backdrop = button(Space::new().width(Fill).height(Fill))
+            .on_press(Message::DismissCLIDialog)
             .style(|_theme, _status| button::Style {
                 background: Some(Color::from_rgba(0.0, 0.0, 0.0, 0.5).into()),
                 ..Default::default()
