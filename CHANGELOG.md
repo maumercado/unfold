@@ -2,6 +2,14 @@
 
 All notable changes to Unfold will be documented in this file.
 
+## [1.1.1](https://github.com/maumercado/unfold/compare/v1.1.0...v1.1.1) (2026-01-19)
+
+
+### Bug Fixes
+
+* bump version to 1.1.1 for corrected release ([41ef50c](https://github.com/maumercado/unfold/commit/41ef50cfd469834127755644b98d0c72ce06d330))
+* update version to 1.1.0 in Cargo.toml ([acf0836](https://github.com/maumercado/unfold/commit/acf0836e226d9560ec853c266524fc165ffab5f3))
+
 ## [1.0.0] - 2025-01-08
 
 ### Features
