@@ -108,7 +108,51 @@ fn install_cli_tool() -> Result<String, String> {
     Err("CLI installation is only supported on Unix systems (macOS, Linux)".to_string())
 }
 
+/// Print help message and exit
+fn print_help() {
+    println!("Unfold - A high-performance JSON viewer\n");
+    println!("USAGE:");
+    println!("    unfold [FILE]\n");
+    println!("ARGS:");
+    println!("    <FILE>    JSON file to open (optional)\n");
+    println!("OPTIONS:");
+    println!("    -h, --help       Print help information");
+    println!("    -V, --version    Print version information");
+}
+
+/// Print version and exit
+fn print_version() {
+    println!("unfold {}", env!("CARGO_PKG_VERSION"));
+}
+
 pub fn main() -> iced::Result {
+    // Handle CLI arguments before starting GUI
+    let args: Vec<String> = env::args().collect();
+
+    // Check for flags first
+    for arg in &args[1..] {
+        match arg.as_str() {
+            "-h" | "--help" => {
+                print_help();
+                std::process::exit(0);
+            }
+            "-V" | "--version" => {
+                print_version();
+                std::process::exit(0);
+            }
+            _ => {}
+        }
+    }
+
+    // If running from terminal with no file argument, show help
+    // Check if stdout is a TTY (terminal) vs launched from GUI
+    use std::io::IsTerminal;
+    if args.len() == 1 && std::io::stdout().is_terminal() {
+        // No file provided and running in terminal - show help
+        print_help();
+        std::process::exit(0);
+    }
+
     iced::application(App::boot, App::update, App::view)
         .window_size((900.0, 700.0))
         .resizable(true)
