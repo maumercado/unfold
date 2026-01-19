@@ -5,8 +5,9 @@
 use muda::{
     Menu, Submenu, MenuItem, PredefinedMenuItem, MenuEvent,
     accelerator::{Accelerator, Modifiers as MudaModifiers, Code},
-    AboutMetadata,
 };
+#[cfg(target_os = "macos")]
+use muda::AboutMetadata;
 
 use crate::config::Config;
 use crate::message::Message;
@@ -42,7 +43,7 @@ thread_local! {
 pub fn create_app_menu() -> Menu {
     let menu = Menu::new();
 
-    // Load config to check if CLI is already installed
+    // Load config to check if CLI is already installed (used on all platforms)
     let config = Config::load();
     let cli_not_installed = !config.cli_installed;
 
@@ -177,6 +178,19 @@ pub fn create_app_menu() -> Menu {
             "Keyboard Shortcuts",
             true,
             Some(Accelerator::new(Some(MudaModifiers::SUPER), Code::Slash)),
+        ),
+        &PredefinedMenuItem::separator(),
+        &MenuItem::with_id(
+            menu_ids::CHECK_UPDATES,
+            "Check for Updates...",
+            true,
+            None::<Accelerator>,
+        ),
+        &MenuItem::with_id(
+            menu_ids::INSTALL_CLI,
+            "Install Command Line Tool...",
+            cli_not_installed,
+            None::<Accelerator>,
         ),
     ]);
     let _ = menu.append(&help_menu);
