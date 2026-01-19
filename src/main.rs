@@ -24,6 +24,8 @@ use std::path::PathBuf;
 use std::time::{Duration, Instant};
 use std::env;
 use std::process::Command;
+#[cfg(unix)]
+use std::os::unix::fs::symlink;
 
 // Re-export from modules
 use theme::{AppTheme, ThemeColors, get_theme_colors, button_3d_style_themed, button_toggle_style_themed};
@@ -33,6 +35,50 @@ use update_check::{UpdateCheckState, fetch_latest_release};
 use flat_row::{FlatRow, ValueType, ROW_HEIGHT, BUFFER_ROWS};
 use parse_error::ParseError;
 use parser::{JsonTree, JsonValue};
+
+/// Install the CLI tool by creating a symlink in /usr/local/bin
+#[cfg(unix)]
+fn install_cli_tool() -> Result<String, String> {
+    let target_path = PathBuf::from("/usr/local/bin/unfold");
+
+    // Get the path to the current executable
+    let exe_path = env::current_exe()
+        .map_err(|e| format!("Failed to get executable path: {}", e))?;
+
+    // For macOS .app bundles, the executable is inside Contents/MacOS/
+    // We want to link directly to the executable
+    let source_path = exe_path.clone();
+
+    // Check if /usr/local/bin exists
+    let bin_dir = PathBuf::from("/usr/local/bin");
+    if !bin_dir.exists() {
+        return Err("Directory /usr/local/bin does not exist. Please create it first.".to_string());
+    }
+
+    // Remove existing symlink if present
+    if target_path.exists() || target_path.is_symlink() {
+        fs::remove_file(&target_path)
+            .map_err(|e| format!("Failed to remove existing file: {}. Try: sudo rm {}", e, target_path.display()))?;
+    }
+
+    // Create the symlink
+    symlink(&source_path, &target_path)
+        .map_err(|e| {
+            if e.kind() == std::io::ErrorKind::PermissionDenied {
+                format!("Permission denied. Try running: sudo ln -sf \"{}\" \"{}\"",
+                    source_path.display(), target_path.display())
+            } else {
+                format!("Failed to create symlink: {}", e)
+            }
+        })?;
+
+    Ok("CLI installed! You can now use 'unfold' from the terminal.".to_string())
+}
+
+#[cfg(not(unix))]
+fn install_cli_tool() -> Result<String, String> {
+    Err("CLI installation is only supported on Unix systems (macOS, Linux)".to_string())
+}
 
 pub fn main() -> iced::Result {
     iced::application(App::boot, App::update, App::view)
@@ -984,6 +1030,21 @@ impl App {
                 } else {
                     Task::none()
                 }
+            }
+            Message::InstallCLI => {
+                Task::perform(
+                    async {
+                        install_cli_tool()
+                    },
+                    Message::InstallCLIResult,
+                )
+            }
+            Message::InstallCLIResult(result) => {
+                match result {
+                    Ok(msg) => self.status = format!("✓ {}", msg),
+                    Err(msg) => self.status = format!("✗ {}", msg),
+                }
+                Task::none()
             }
         }
     }

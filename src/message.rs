@@ -77,6 +77,10 @@ pub enum Message {
     ExportAsJson,
     ExportAsMinifiedJson,
     ExportAsFormattedJson,
+    /// Install CLI command to /usr/local/bin
+    InstallCLI,
+    /// Result of CLI installation attempt
+    InstallCLIResult(Result<String, String>),
 }
 
 /// Which submenu is currently open in context menu

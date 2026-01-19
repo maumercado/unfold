@@ -14,6 +14,7 @@ use crate::message::Message;
 pub mod menu_ids {
     // Menu bar items
     pub const CHECK_UPDATES: &str = "check_updates";
+    pub const INSTALL_CLI: &str = "install_cli";
     pub const OPEN_FILE: &str = "open_file";
     pub const OPEN_NEW_WINDOW: &str = "open_new_window";
     pub const OPEN_EXTERNAL: &str = "open_external";
@@ -55,6 +56,12 @@ pub fn create_app_menu() -> Menu {
             &MenuItem::with_id(
                 menu_ids::CHECK_UPDATES,
                 "Check for Updates...",
+                true,
+                None::<Accelerator>,
+            ),
+            &MenuItem::with_id(
+                menu_ids::INSTALL_CLI,
+                "Install Command Line Tool...",
                 true,
                 None::<Accelerator>,
             ),
@@ -250,6 +257,7 @@ pub fn menu_event_to_message(event: &muda::MenuEvent) -> Message {
         id if id == menu_ids::TOGGLE_THEME => Message::ToggleTheme,
         id if id == menu_ids::KEYBOARD_SHORTCUTS => Message::ToggleHelp,
         id if id == menu_ids::CHECK_UPDATES => Message::CheckForUpdates,
+        id if id == menu_ids::INSTALL_CLI => Message::InstallCLI,
         id if id == menu_ids::EXPORT_JSON => Message::ExportJson,
         id if id == menu_ids::EXPAND_ALL => Message::ExpandAllChildren,
         id if id == menu_ids::COLLAPSE_ALL => Message::CollapseAllChildren,
@@ -272,6 +280,7 @@ mod tests {
         // Ensure all menu IDs are distinct
         let ids = vec![
             menu_ids::CHECK_UPDATES,
+            menu_ids::INSTALL_CLI,
             menu_ids::OPEN_FILE,
             menu_ids::OPEN_NEW_WINDOW,
             menu_ids::COPY_VALUE,
