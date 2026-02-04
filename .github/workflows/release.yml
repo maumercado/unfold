@@ -191,8 +191,29 @@ jobs:
           name: macos-intel-dmg
           path: Unfold-*.dmg
 
+  build-windows:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Build release binary
+        run: cargo build --release
+
+      - name: Create ZIP
+        run: |
+          Compress-Archive -Path target/release/unfold.exe -DestinationPath Unfold-${{ github.ref_name }}-windows-x64.zip
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: windows-x64-zip
+          path: Unfold-*.zip
+
   create-release:
-    needs: [build-macos, build-macos-intel]
+    needs: [build-macos, build-macos-intel, build-windows]
     runs-on: ubuntu-latest
     permissions:
       contents: write
@@ -213,3 +234,4 @@ jobs:
           generate_release_notes: true
           files: |
             artifacts/**/*.dmg
+            artifacts/**/*.zip
