@@ -1,5 +1,9 @@
 //! Unfold - A high-performance JSON viewer built in Rust with Iced.
 
+// On Windows, this prevents a console window from appearing when launched from Explorer.
+// Has no effect on macOS/Linux.
+#![windows_subsystem = "windows"]
+
 mod parser;
 mod theme;
 mod menu;
