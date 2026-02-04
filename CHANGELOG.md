@@ -2,6 +2,13 @@
 
 All notable changes to Unfold will be documented in this file.
 
+## [1.2.1](https://github.com/maumercado/unfold/compare/v1.2.0...v1.2.1) (2026-02-04)
+
+
+### Bug Fixes
+
+* prevent Windows from exiting immediately on double-click ([1fe4f64](https://github.com/maumercado/unfold/commit/1fe4f64b717701fc15f442e3f8c81293107869bd))
+
 ## [1.1.1](https://github.com/maumercado/unfold/compare/v1.1.0...v1.1.1) (2026-01-19)
 
 
