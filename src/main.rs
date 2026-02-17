@@ -159,7 +159,16 @@ pub fn main() -> iced::Result {
         std::process::exit(0);
     }
 
+    let icon = window::icon::from_file_data(
+        include_bytes!("../assets/icon-32.png"),
+        None,
+    ).ok();
+
     iced::application(App::boot, App::update, App::view)
+        .window(window::Settings {
+            icon,
+            ..Default::default()
+        })
         .window_size((900.0, 700.0))
         .resizable(true)
         .title(|app: &App| {
