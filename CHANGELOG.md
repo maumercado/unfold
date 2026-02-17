@@ -2,6 +2,13 @@
 
 All notable changes to Unfold will be documented in this file.
 
+## [1.2.4](https://github.com/maumercado/unfold/compare/v1.2.3...v1.2.4) (2026-02-17)
+
+
+### Bug Fixes
+
+* set window icon at runtime for Windows title bar ([3c86d4f](https://github.com/maumercado/unfold/commit/3c86d4f449bfb21fd83e36f3b7fa79bf660754eb))
+
 ## [1.2.3](https://github.com/maumercado/unfold/compare/v1.2.2...v1.2.3) (2026-02-17)
 
 
