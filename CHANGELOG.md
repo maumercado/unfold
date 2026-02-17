@@ -2,6 +2,13 @@
 
 All notable changes to Unfold will be documented in this file.
 
+## [1.2.3](https://github.com/maumercado/unfold/compare/v1.2.2...v1.2.3) (2026-02-17)
+
+
+### Bug Fixes
+
+* embed app icon in Windows exe ([ca70f56](https://github.com/maumercado/unfold/commit/ca70f56599f96fa3cb2ecbbb6f080e1e39e41031))
+
 ## [1.2.1](https://github.com/maumercado/unfold/compare/v1.2.0...v1.2.1) (2026-02-04)
 
 
