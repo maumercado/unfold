@@ -2,9 +2,9 @@
 //!
 //! Each variant represents an event that can update the application state.
 
-use std::path::PathBuf;
-use iced::widget::scrollable::Viewport;
 use iced::keyboard::{Key, Modifiers};
+use iced::widget::scrollable::Viewport;
+use std::path::PathBuf;
 
 use crate::update_check::UpdateCheckState;
 
@@ -23,6 +23,8 @@ pub enum Message {
     SearchPrev,
     ToggleCaseSensitive,
     ToggleRegex,
+    /// Cycle the search scope: All → Keys → Values → All
+    ToggleSearchScope,
     /// Keyboard events - Key and Modifiers tell us what was pressed
     KeyPressed(Key, Modifiers),
     ModifiersChanged(Modifiers),
