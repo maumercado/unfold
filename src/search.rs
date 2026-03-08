@@ -123,6 +123,83 @@ pub fn search_nodes(
     (results, None)
 }
 
+/// Split `haystack` into a list of `(substring, is_match)` segments so that
+/// matched substrings can be rendered in a highlight colour while the rest
+/// keeps its normal colour.
+///
+/// The original casing of `haystack` is always preserved in the output.
+///
+/// Returns a single `(haystack.to_string(), false)` when:
+/// - `query` is empty, or
+/// - `query` does not match anything in `haystack`.
+pub fn highlight_segments(
+    haystack: &str,
+    query: &str,
+    case_sensitive: bool,
+    use_regex: bool,
+) -> Vec<(String, bool)> {
+    if query.is_empty() || haystack.is_empty() {
+        return vec![(haystack.to_string(), false)];
+    }
+
+    // Collect byte-ranges of every match.
+    let mut ranges: Vec<(usize, usize)> = Vec::new();
+
+    if use_regex {
+        let pattern = if case_sensitive {
+            query.to_string()
+        } else {
+            format!("(?i){}", query)
+        };
+        let Ok(re) = Regex::new(&pattern) else {
+            return vec![(haystack.to_string(), false)];
+        };
+        for m in re.find_iter(haystack) {
+            ranges.push((m.start(), m.end()));
+        }
+    } else {
+        // Plain-text: scan for non-overlapping matches, preserving original casing.
+        let (search_in, needle) = if case_sensitive {
+            (haystack.to_string(), query.to_string())
+        } else {
+            (haystack.to_lowercase(), query.to_lowercase())
+        };
+
+        let mut start = 0;
+        while start < search_in.len() {
+            if let Some(pos) = search_in[start..].find(&needle) {
+                let abs = start + pos;
+                ranges.push((abs, abs + needle.len()));
+                start = abs + needle.len().max(1);
+            } else {
+                break;
+            }
+        }
+    }
+
+    if ranges.is_empty() {
+        return vec![(haystack.to_string(), false)];
+    }
+
+    // Build segments from the collected ranges.
+    let mut segments = Vec::new();
+    let mut cursor = 0_usize;
+
+    for (start, end) in ranges {
+        if cursor < start {
+            segments.push((haystack[cursor..start].to_string(), false));
+        }
+        segments.push((haystack[start..end].to_string(), true));
+        cursor = end;
+    }
+
+    if cursor < haystack.len() {
+        segments.push((haystack[cursor..].to_string(), false));
+    }
+
+    segments
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -413,5 +490,125 @@ mod tests {
             13,
             "All scope: 11 key + 2 value-only matches"
         );
+    }
+
+    // =========================================================================
+    // highlight_segments tests
+    // =========================================================================
+
+    /// Empty query → single non-highlighted segment.
+    #[test]
+    fn test_highlight_segments_empty_query() {
+        let segs = highlight_segments("crsTransferStatus", "", false, false);
+        assert_eq!(segs, vec![("crsTransferStatus".to_string(), false)]);
+    }
+
+    /// Empty haystack → single non-highlighted empty segment.
+    #[test]
+    fn test_highlight_segments_empty_haystack() {
+        let segs = highlight_segments("", "tran", false, false);
+        assert_eq!(segs, vec![("".to_string(), false)]);
+    }
+
+    /// No match → single non-highlighted segment with the full string.
+    #[test]
+    fn test_highlight_segments_no_match() {
+        let segs = highlight_segments("hello world", "xyz", false, false);
+        assert_eq!(segs, vec![("hello world".to_string(), false)]);
+    }
+
+    /// Match at the very start of the string.
+    #[test]
+    fn test_highlight_segments_match_at_start() {
+        let segs = highlight_segments("transfer credit", "trans", false, false);
+        assert_eq!(segs, vec![
+            ("trans".to_string(), true),
+            ("fer credit".to_string(), false),
+        ]);
+    }
+
+    /// Match at the very end of the string.
+    #[test]
+    fn test_highlight_segments_match_at_end() {
+        let segs = highlight_segments("credit transfer", "transfer", false, false);
+        assert_eq!(segs, vec![
+            ("credit ".to_string(), false),
+            ("transfer".to_string(), true),
+        ]);
+    }
+
+    /// Match in the middle of the string.
+    #[test]
+    fn test_highlight_segments_match_in_middle() {
+        let segs = highlight_segments("crsTransferStatus", "tran", false, false);
+        assert_eq!(segs, vec![
+            ("crs".to_string(), false),
+            ("Tran".to_string(), true),   // original casing preserved
+            ("sferStatus".to_string(), false),
+        ]);
+    }
+
+    /// Multiple non-overlapping matches in one string.
+    #[test]
+    fn test_highlight_segments_multiple_matches() {
+        let segs = highlight_segments("tran and TRAN and tran", "tran", false, false);
+        assert_eq!(segs, vec![
+            ("tran".to_string(), true),
+            (" and ".to_string(), false),
+            ("TRAN".to_string(), true),
+            (" and ".to_string(), false),
+            ("tran".to_string(), true),
+        ]);
+    }
+
+    /// Case-sensitive mode: only exact case matches.
+    #[test]
+    fn test_highlight_segments_case_sensitive() {
+        // "TRAN" should NOT match "tran" in case-sensitive mode
+        let segs = highlight_segments("crsTransferStatus", "TRAN", true, false);
+        assert_eq!(segs, vec![("crsTransferStatus".to_string(), false)]);
+
+        // "Tran" should match exactly
+        let segs = highlight_segments("crsTransferStatus", "Tran", true, false);
+        assert_eq!(segs, vec![
+            ("crs".to_string(), false),
+            ("Tran".to_string(), true),
+            ("sferStatus".to_string(), false),
+        ]);
+    }
+
+    /// Original casing is always preserved in output, even for case-insensitive matches.
+    #[test]
+    fn test_highlight_segments_preserves_original_casing() {
+        let segs = highlight_segments("John TRAN", "tran", false, false);
+        assert_eq!(segs, vec![
+            ("John ".to_string(), false),
+            ("TRAN".to_string(), true),  // "TRAN" preserved, not lowercased to "tran"
+        ]);
+    }
+
+    /// Regex mode matches and segments correctly.
+    #[test]
+    fn test_highlight_segments_regex() {
+        let segs = highlight_segments("transition and transfer", r"trans(ition|fer)", false, true);
+        assert_eq!(segs, vec![
+            ("transition".to_string(), true),
+            (" and ".to_string(), false),
+            ("transfer".to_string(), true),
+        ]);
+    }
+
+    /// Invalid regex → single non-highlighted segment (graceful fallback).
+    #[test]
+    fn test_highlight_segments_invalid_regex() {
+        let segs = highlight_segments("some text", r"[invalid", false, true);
+        assert_eq!(segs, vec![("some text".to_string(), false)]);
+    }
+
+    /// Whole-string match → single highlighted segment, no surrounding empties.
+    #[test]
+    fn test_highlight_segments_full_string_match() {
+        let segs = highlight_segments("TRAN", "tran", false, false);
+        assert_eq!(segs, vec![("TRAN".to_string(), true)]);
     }
 }
