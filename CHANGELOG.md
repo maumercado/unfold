@@ -2,6 +2,13 @@
 
 All notable changes to Unfold will be documented in this file.
 
+## [1.4.0](https://github.com/maumercado/unfold/compare/v1.3.0...v1.4.0) (2026-03-08)
+
+
+### Features
+
+* add inline search match highlighting within keys and values ([#7](https://github.com/maumercado/unfold/issues/7)) ([816452b](https://github.com/maumercado/unfold/commit/816452bf0b8c3d17b08e16aa2dfd4055ac7cf287))
+
 ## [1.3.0](https://github.com/maumercado/unfold/compare/v1.2.4...v1.3.0) (2026-03-08)
 
 
