@@ -444,10 +444,55 @@ impl App {
         }
     }
 
+    /// Render a string as a sequence of text widgets, highlighting matched substrings.
+    ///
+    /// When the row is a search match, each segment returned by `highlight_segments`
+    /// is rendered: matched parts use `highlight_color`, the rest use `base_color`.
+    /// When the row is not a search match the string is rendered as a single widget.
+    fn render_highlighted_text<'a>(
+        &self,
+        content: &str,
+        base_color: Color,
+        highlight_color: Color,
+        is_search_row: bool,
+    ) -> Vec<Element<'a, Message>> {
+        if !is_search_row || self.search_query.is_empty() {
+            return vec![
+                text(content.to_string())
+                    .font(Font::MONOSPACE)
+                    .size(13)
+                    .color(base_color)
+                    .into(),
+            ];
+        }
+
+        let segments = search::highlight_segments(
+            content,
+            &self.search_query,
+            self.search_case_sensitive,
+            self.search_use_regex,
+        );
+
+        segments
+            .into_iter()
+            .map(|(seg, is_match)| {
+                let color = if is_match { highlight_color } else { base_color };
+                text(seg).font(Font::MONOSPACE).size(13).color(color).into()
+            })
+            .collect()
+    }
+
     /// Render a single FlatRow into an Element
     fn render_flat_row<'a>(&self, flat_row: &FlatRow) -> Element<'a, Message> {
         let colors = get_theme_colors(self.theme);
         let value_color = flat_row.value_type.color(&colors);
+
+        let is_selected = self.selected_node == Some(flat_row.node_index);
+        let is_match = self.search_matches.contains(&flat_row.node_index);
+        let is_current_result = self.search_result_index
+            .map(|i| self.search_results.get(i) == Some(&flat_row.node_index))
+            .unwrap_or(false);
+        let is_search_row = is_match || is_current_result;
 
         let node_row: Element<'a, Message> = if flat_row.is_expandable {
             let indicator = if flat_row.is_expanded { "⊟ " } else { "⊞ " };
@@ -459,13 +504,12 @@ impl App {
 
             if let Some(k) = &flat_row.key {
                 let display_key = if k.is_empty() { "\"\"".to_string() } else { k.clone() };
-                row_elements.push(
-                    text(display_key)
-                        .font(Font::MONOSPACE)
-                        .size(13)
-                        .color(colors.key)
-                        .into()
-                );
+                row_elements.extend(self.render_highlighted_text(
+                    &display_key,
+                    colors.key,
+                    colors.search_highlight_text,
+                    is_search_row,
+                ));
                 row_elements.push(
                     text(": ")
                         .font(Font::MONOSPACE)
@@ -476,13 +520,12 @@ impl App {
             }
 
             if !flat_row.is_expanded {
-                row_elements.push(
-                    text(flat_row.value_display.clone())
-                        .font(Font::MONOSPACE)
-                        .size(13)
-                        .color(value_color)
-                        .into()
-                );
+                row_elements.extend(self.render_highlighted_text(
+                    &flat_row.value_display,
+                    value_color,
+                    colors.search_highlight_text,
+                    is_search_row,
+                ));
             }
 
             button(row(row_elements).spacing(0))
@@ -498,13 +541,12 @@ impl App {
 
             if let Some(k) = &flat_row.key {
                 let display_key = if k.is_empty() { "\"\"".to_string() } else { k.clone() };
-                row_elements.push(
-                    text(display_key)
-                        .font(Font::MONOSPACE)
-                        .size(13)
-                        .color(colors.key)
-                        .into()
-                );
+                row_elements.extend(self.render_highlighted_text(
+                    &display_key,
+                    colors.key,
+                    colors.search_highlight_text,
+                    is_search_row,
+                ));
                 row_elements.push(
                     text(": ")
                         .font(Font::MONOSPACE)
@@ -514,13 +556,12 @@ impl App {
                 );
             }
 
-            row_elements.push(
-                text(flat_row.value_display.clone())
-                    .font(Font::MONOSPACE)
-                    .size(13)
-                    .color(value_color)
-                    .into()
-            );
+            row_elements.extend(self.render_highlighted_text(
+                &flat_row.value_display,
+                value_color,
+                colors.search_highlight_text,
+                is_search_row,
+            ));
 
             button(row(row_elements).spacing(0))
                 .on_press(Message::SelectNode(flat_row.node_index))
@@ -528,12 +569,6 @@ impl App {
                 .style(button::text)
                 .into()
         };
-
-        let is_selected = self.selected_node == Some(flat_row.node_index);
-        let is_match = self.search_matches.contains(&flat_row.node_index);
-        let is_current_result = self.search_result_index
-            .map(|i| self.search_results.get(i) == Some(&flat_row.node_index))
-            .unwrap_or(false);
 
         let background_color = if is_current_result {
             Some(colors.search_current)
