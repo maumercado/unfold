@@ -2,6 +2,13 @@
 
 All notable changes to Unfold will be documented in this file.
 
+## [1.3.0](https://github.com/maumercado/unfold/compare/v1.2.4...v1.3.0) (2026-03-08)
+
+
+### Features
+
+* add search scope filter (keys, values, or both) ([#5](https://github.com/maumercado/unfold/issues/5)) ([8219848](https://github.com/maumercado/unfold/commit/8219848a9764050ac14274b2eb806f716d527124))
+
 ## [1.2.4](https://github.com/maumercado/unfold/compare/v1.2.3...v1.2.4) (2026-02-17)
 
 
