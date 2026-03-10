@@ -2,6 +2,13 @@
 
 All notable changes to Unfold will be documented in this file.
 
+## [1.5.0](https://github.com/maumercado/unfold/compare/v1.4.0...v1.5.0) (2026-03-10)
+
+
+### Features
+
+* unify search to always match both keys and values ([4a847f8](https://github.com/maumercado/unfold/commit/4a847f8e439abf258b39cf6072a17f6dd95a6dbc))
+
 ## [1.4.0](https://github.com/maumercado/unfold/compare/v1.3.0...v1.4.0) (2026-03-08)
 
 
