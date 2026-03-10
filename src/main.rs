@@ -210,7 +210,6 @@ struct App {
     search_matches: HashSet<usize>,
     search_case_sensitive: bool,
     search_use_regex: bool,
-    search_scope: search::SearchScope,
     search_regex_error: Option<String>,
     /// Scrollable ID for programmatic scrolling
     tree_scrollable_id: WidgetId,
@@ -275,7 +274,6 @@ impl App {
             search_matches: HashSet::new(),
             search_case_sensitive: false,
             search_use_regex: false,
-            search_scope: search::SearchScope::All,
             search_regex_error: None,
             tree_scrollable_id: WidgetId::unique(),
             search_input_id: WidgetId::unique(),
@@ -774,10 +772,6 @@ impl App {
                 self.search_use_regex = !self.search_use_regex;
                 self.run_search()
             }
-            Message::ToggleSearchScope => {
-                self.search_scope = self.search_scope.next();
-                self.run_search()
-            }
             Message::SearchNext => {
                 if !self.search_results.is_empty() {
                     let new_index = match self.search_result_index {
@@ -1241,7 +1235,6 @@ impl App {
                 &self.search_query,
                 self.search_case_sensitive,
                 self.search_use_regex,
-                self.search_scope,
             );
 
             self.search_regex_error = error;
@@ -1389,13 +1382,6 @@ impl App {
             .style(button_toggle_style_themed(self.search_use_regex, colors))
             .on_press(Message::ToggleRegex);
 
-        // Scope button: active (highlighted) when not in the default All mode
-        let scope_active = self.search_scope != search::SearchScope::All;
-        let scope_button = button(text(self.search_scope.label()).size(11))
-            .padding([4, 8])
-            .style(button_toggle_style_themed(scope_active, colors))
-            .on_press(Message::ToggleSearchScope);
-
         let search_input = text_input("Find...", &self.search_query)
             .id(self.search_input_id.clone())
             .on_input(Message::SearchQueryChanged)
@@ -1452,8 +1438,6 @@ impl App {
                 case_button,
                 Space::new().width(Length::Fixed(3.0)),
                 regex_button,
-                Space::new().width(Length::Fixed(3.0)),
-                scope_button,
                 Space::new().width(Length::Fixed(8.0)),
                 search_input,
                 Space::new().width(Length::Fixed(10.0)),

@@ -23,8 +23,6 @@ pub enum Message {
     SearchPrev,
     ToggleCaseSensitive,
     ToggleRegex,
-    /// Cycle the search scope: All → Keys → Values → All
-    ToggleSearchScope,
     /// Keyboard events - Key and Modifiers tell us what was pressed
     KeyPressed(Key, Modifiers),
     ModifiersChanged(Modifiers),

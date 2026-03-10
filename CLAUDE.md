@@ -82,7 +82,7 @@ serde_json = "1.0"
 - [x] Status bar with node count and load time
 
 ### Search
-- [x] Text search with highlighting
+- [x] Text search with highlighting (always searches both keys and values)
 - [x] Case-sensitive toggle (Aa button)
 - [x] RegEx search toggle (.* button)
 - [x] Navigate between results (Prev/Next buttons)
