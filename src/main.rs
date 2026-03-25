@@ -393,6 +393,8 @@ impl App {
             JsonValue::Array => {
                 if node.expanded {
                     (":".to_string(), ValueType::Bracket)
+                } else if node.children.is_empty() {
+                    ("[]".to_string(), ValueType::Key)
                 } else {
                     ("[...]".to_string(), ValueType::Key)
                 }
@@ -400,6 +402,8 @@ impl App {
             JsonValue::Object => {
                 if node.expanded {
                     (":".to_string(), ValueType::Bracket)
+                } else if node.children.is_empty() {
+                    ("{}".to_string(), ValueType::Key)
                 } else {
                     ("{...}".to_string(), ValueType::Key)
                 }
