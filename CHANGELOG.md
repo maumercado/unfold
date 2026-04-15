@@ -2,6 +2,13 @@
 
 All notable changes to Unfold will be documented in this file.
 
+## [1.5.1](https://github.com/maumercado/unfold/compare/v1.5.0...v1.5.1) (2026-03-25)
+
+
+### Bug Fixes
+
+* show [] and {} for empty arrays and objects instead of [...] and {...} ([#11](https://github.com/maumercado/unfold/issues/11)) ([48c95d7](https://github.com/maumercado/unfold/commit/48c95d743ce0bd33b4cb6533a6fc6c42b5f98110))
+
 ## [1.5.0](https://github.com/maumercado/unfold/compare/v1.4.0...v1.5.0) (2026-03-10)
 
 
