@@ -2,6 +2,13 @@
 
 All notable changes to Unfold will be documented in this file.
 
+## [1.5.3](https://github.com/maumercado/unfold/compare/v1.5.2...v1.5.3) (2026-04-15)
+
+
+### Bug Fixes
+
+* restore tag-based release handoff ([ffda706](https://github.com/maumercado/unfold/commit/ffda706584d49d960e85266244d23958580c67eb))
+
 ## [1.5.2](https://github.com/maumercado/unfold/compare/v1.5.1...v1.5.2) (2026-04-15)
 
 
