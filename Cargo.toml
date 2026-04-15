@@ -25,7 +25,6 @@ winresource = "0.1"
 name = "Unfold"
 identifier = "com.codigo.unfold"
 icon = ["assets/icon.icns"]
-version = "1.2.4"
 short_description = "A high-performance JSON viewer"
 long_description = "Unfold is a fast, native JSON viewer built in Rust. Features include syntax highlighting, search with regex support, keyboard shortcuts, and efficient handling of large files."
 category = "Developer Tool"
