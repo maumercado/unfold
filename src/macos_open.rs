@@ -1,52 +1,38 @@
 #![cfg(target_os = "macos")]
 #![allow(unexpected_cfgs)]
 
-use objc::declare::ClassDecl;
-use objc::runtime::{Class, Object, Sel};
-use objc::{class, msg_send, sel, sel_impl};
-use std::ffi::{CStr, c_char};
+use objc::declare::MethodImplementation;
+use objc::runtime::{self, BOOL, Class, NO, Object, Sel, YES};
+use objc::{Encode, EncodeArguments, class, msg_send, sel, sel_impl};
+use std::ffi::{CStr, CString, c_char};
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::{Mutex, Once, OnceLock};
+use std::sync::{Mutex, OnceLock};
 
-const K_CORE_EVENT_CLASS: u32 = four_char_code(*b"aevt");
-const K_AE_OPEN_DOCUMENTS: u32 = four_char_code(*b"odoc");
-const KEY_DIRECT_OBJECT: u32 = four_char_code(*b"----");
-const TYPE_FILE_URL: u32 = four_char_code(*b"furl");
+const NS_APPLICATION_DELEGATE_REPLY_SUCCESS: usize = 0;
+const NS_APPLICATION_DELEGATE_REPLY_FAILURE: usize = 2;
 
 static APP_READY: AtomicBool = AtomicBool::new(false);
-static INSTALL_HANDLER: Once = Once::new();
+static OPEN_FILE_HANDLER_INSTALLED: AtomicBool = AtomicBool::new(false);
 static PENDING_FILES: OnceLock<Mutex<Vec<PathBuf>>> = OnceLock::new();
-
-const fn four_char_code(bytes: [u8; 4]) -> u32 {
-    ((bytes[0] as u32) << 24)
-        | ((bytes[1] as u32) << 16)
-        | ((bytes[2] as u32) << 8)
-        | (bytes[3] as u32)
-}
 
 fn pending_files() -> &'static Mutex<Vec<PathBuf>> {
     PENDING_FILES.get_or_init(|| Mutex::new(Vec::new()))
 }
 
 pub(crate) fn install_open_file_handler() {
-    INSTALL_HANDLER.call_once(|| unsafe {
-        let pool = new_autorelease_pool();
+    if OPEN_FILE_HANDLER_INSTALLED.load(Ordering::SeqCst) {
+        return;
+    }
 
-        let handler: *mut Object = msg_send![handler_class(), new];
-        let _: *mut Object = msg_send![handler, retain];
+    unsafe {
+        let Some(delegate_class) = winit_application_delegate_class() else {
+            return;
+        };
 
-        let manager: *mut Object = msg_send![class!(NSAppleEventManager), sharedAppleEventManager];
-        let _: () = msg_send![
-            manager,
-            setEventHandler: handler
-            andSelector: sel!(handleAppleEvent:withReplyEvent:)
-            forEventClass: K_CORE_EVENT_CLASS
-            andEventID: K_AE_OPEN_DOCUMENTS
-        ];
-
-        drain_autorelease_pool(pool);
-    });
+        install_delegate_methods(delegate_class as *const _ as *mut _);
+        OPEN_FILE_HANDLER_INSTALLED.store(true, Ordering::SeqCst);
+    }
 }
 
 pub(crate) fn take_pending_open_files() -> Vec<PathBuf> {
@@ -61,14 +47,126 @@ pub(crate) fn mark_app_ready() {
     APP_READY.store(true, Ordering::SeqCst);
 }
 
-extern "C" fn handle_apple_event(
+unsafe fn winit_application_delegate_class() -> Option<&'static Class> {
+    unsafe { current_application_delegate_class() }
+        .or_else(|| Class::get("WinitApplicationDelegate"))
+}
+
+unsafe fn current_application_delegate_class() -> Option<&'static Class> {
+    let app: *mut Object = unsafe { msg_send![class!(NSApplication), sharedApplication] };
+    if app.is_null() {
+        return None;
+    }
+
+    let delegate: *mut Object = unsafe { msg_send![app, delegate] };
+    if delegate.is_null() {
+        return None;
+    }
+
+    let delegate_class = unsafe { runtime::object_getClass(delegate) };
+    if delegate_class.is_null() {
+        None
+    } else {
+        Some(unsafe { &*delegate_class })
+    }
+}
+
+unsafe fn install_delegate_methods(delegate_class: *mut Class) {
+    unsafe {
+        add_method_if_missing(
+            delegate_class,
+            sel!(application:openURLs:),
+            application_open_urls as extern "C" fn(&Object, Sel, *mut Object, *mut Object),
+        );
+        add_method_if_missing(
+            delegate_class,
+            sel!(application:openFile:),
+            application_open_file as extern "C" fn(&Object, Sel, *mut Object, *mut Object) -> BOOL,
+        );
+        add_method_if_missing(
+            delegate_class,
+            sel!(application:openFiles:),
+            application_open_files as extern "C" fn(&Object, Sel, *mut Object, *mut Object),
+        );
+    }
+}
+
+unsafe fn add_method_if_missing<F>(delegate_class: *mut Class, selector: Sel, implementation: F)
+where
+    F: MethodImplementation<Callee = Object>,
+{
+    if unsafe { runtime::class_getInstanceMethod(delegate_class, selector) }.is_null() {
+        let types = method_type_encoding::<F::Ret, F::Args>();
+        let _ = unsafe {
+            runtime::class_addMethod(
+                delegate_class,
+                selector,
+                implementation.imp(),
+                types.as_ptr(),
+            )
+        };
+    }
+}
+
+fn method_type_encoding<R, A>() -> CString
+where
+    R: Encode,
+    A: EncodeArguments,
+{
+    let mut types = R::encode().as_str().to_owned();
+    types.push_str(<*mut Object>::encode().as_str());
+    types.push_str(Sel::encode().as_str());
+
+    for encoding in A::encodings().as_ref() {
+        types.push_str(encoding.as_str());
+    }
+
+    CString::new(types).expect("Objective-C method encoding contained null byte")
+}
+
+extern "C" fn application_open_urls(
     _this: &Object,
     _cmd: Sel,
-    event: *mut Object,
-    _reply_event: *mut Object,
+    _app: *mut Object,
+    urls: *mut Object,
 ) {
-    let paths = unsafe { extract_paths_from_event(event) };
+    let paths = unsafe { extract_paths_from_url_array(urls) };
     route_opened_paths(paths);
+}
+
+extern "C" fn application_open_file(
+    _this: &Object,
+    _cmd: Sel,
+    _app: *mut Object,
+    filename: *mut Object,
+) -> BOOL {
+    let Some(path) = (unsafe { nsstring_to_string(filename) }).map(PathBuf::from) else {
+        return NO;
+    };
+
+    route_opened_paths(vec![path]);
+    YES
+}
+
+extern "C" fn application_open_files(
+    _this: &Object,
+    _cmd: Sel,
+    app: *mut Object,
+    filenames: *mut Object,
+) {
+    let paths = unsafe { extract_paths_from_string_array(filenames) };
+    let reply = if paths.is_empty() {
+        NS_APPLICATION_DELEGATE_REPLY_FAILURE
+    } else {
+        route_opened_paths(paths);
+        NS_APPLICATION_DELEGATE_REPLY_SUCCESS
+    };
+
+    if !app.is_null() {
+        unsafe {
+            let _: () = msg_send![app, replyToOpenOrPrint: reply];
+        }
+    }
 }
 
 fn route_opened_paths(paths: Vec<PathBuf>) {
@@ -89,43 +187,17 @@ fn route_opened_paths(paths: Vec<PathBuf>) {
     }
 }
 
-fn handler_class() -> &'static Class {
-    static CLASS: OnceLock<&'static Class> = OnceLock::new();
-
-    CLASS.get_or_init(|| unsafe {
-        if let Some(existing) = Class::get("UnfoldOpenFileHandler") {
-            return existing;
-        }
-
-        let mut decl = ClassDecl::new("UnfoldOpenFileHandler", class!(NSObject))
-            .expect("failed to register UnfoldOpenFileHandler");
-
-        decl.add_method(
-            sel!(handleAppleEvent:withReplyEvent:),
-            handle_apple_event as extern "C" fn(&Object, Sel, *mut Object, *mut Object),
-        );
-
-        decl.register()
-    })
-}
-
-unsafe fn extract_paths_from_event(event: *mut Object) -> Vec<PathBuf> {
-    if event.is_null() {
+unsafe fn extract_paths_from_url_array(urls: *mut Object) -> Vec<PathBuf> {
+    if urls.is_null() {
         return Vec::new();
     }
 
-    let descriptor_list: *mut Object =
-        msg_send![event, paramDescriptorForKeyword: KEY_DIRECT_OBJECT];
-    if descriptor_list.is_null() {
-        return Vec::new();
-    }
+    let count: usize = unsafe { msg_send![urls, count] };
+    let mut paths = Vec::with_capacity(count);
 
-    let count: i64 = msg_send![descriptor_list, numberOfItems];
-    let mut paths = Vec::with_capacity(count.max(0) as usize);
-
-    for index in 1..=count {
-        let descriptor: *mut Object = msg_send![descriptor_list, descriptorAtIndex: index];
-        if let Some(path) = unsafe { descriptor_to_path(descriptor) } {
+    for index in 0..count {
+        let url: *mut Object = unsafe { msg_send![urls, objectAtIndex: index] };
+        if let Some(path) = unsafe { nsurl_to_path(url) } {
             paths.push(path);
         }
     }
@@ -133,27 +205,22 @@ unsafe fn extract_paths_from_event(event: *mut Object) -> Vec<PathBuf> {
     paths
 }
 
-unsafe fn descriptor_to_path(descriptor: *mut Object) -> Option<PathBuf> {
-    if descriptor.is_null() {
-        return None;
+unsafe fn extract_paths_from_string_array(strings: *mut Object) -> Vec<PathBuf> {
+    if strings.is_null() {
+        return Vec::new();
     }
 
-    let direct_url: *mut Object = msg_send![descriptor, fileURLValue];
-    if let Some(path) = unsafe { nsurl_to_path(direct_url) } {
-        return Some(path);
-    }
+    let count: usize = unsafe { msg_send![strings, count] };
+    let mut paths = Vec::with_capacity(count);
 
-    let file_url_descriptor: *mut Object =
-        msg_send![descriptor, coerceToDescriptorType: TYPE_FILE_URL];
-    if !file_url_descriptor.is_null() {
-        let coerced_url: *mut Object = msg_send![file_url_descriptor, fileURLValue];
-        if let Some(path) = unsafe { nsurl_to_path(coerced_url) } {
-            return Some(path);
+    for index in 0..count {
+        let string: *mut Object = unsafe { msg_send![strings, objectAtIndex: index] };
+        if let Some(path) = unsafe { nsstring_to_string(string) }.map(PathBuf::from) {
+            paths.push(path);
         }
     }
 
-    let string_value: *mut Object = msg_send![descriptor, stringValue];
-    unsafe { nsstring_to_string(string_value) }.map(PathBuf::from)
+    paths
 }
 
 unsafe fn nsurl_to_path(url: *mut Object) -> Option<PathBuf> {
@@ -161,7 +228,12 @@ unsafe fn nsurl_to_path(url: *mut Object) -> Option<PathBuf> {
         return None;
     }
 
-    let path: *mut Object = msg_send![url, path];
+    let is_file_url: BOOL = unsafe { msg_send![url, isFileURL] };
+    if is_file_url == NO {
+        return None;
+    }
+
+    let path: *mut Object = unsafe { msg_send![url, path] };
     unsafe { nsstring_to_string(path) }.map(PathBuf::from)
 }
 
@@ -170,18 +242,14 @@ unsafe fn nsstring_to_string(ns_string: *mut Object) -> Option<String> {
         return None;
     }
 
-    let utf8_ptr: *const c_char = msg_send![ns_string, UTF8String];
+    let utf8_ptr: *const c_char = unsafe { msg_send![ns_string, UTF8String] };
     if utf8_ptr.is_null() {
         return None;
     }
 
-    Some(unsafe { CStr::from_ptr(utf8_ptr) }.to_string_lossy().into_owned())
-}
-
-unsafe fn new_autorelease_pool() -> *mut Object {
-    msg_send![class!(NSAutoreleasePool), new]
-}
-
-unsafe fn drain_autorelease_pool(pool: *mut Object) {
-    let _: () = msg_send![pool, drain];
+    Some(
+        unsafe { CStr::from_ptr(utf8_ptr) }
+            .to_string_lossy()
+            .into_owned(),
+    )
 }

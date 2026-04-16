@@ -301,6 +301,9 @@ impl App {
         // Load persistent config
         let config = Config::load();
 
+        #[cfg(target_os = "macos")]
+        macos_open::install_open_file_handler();
+
         let app = App {
             tree: None,
             status: String::from("No file loaded"),
