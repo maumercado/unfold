@@ -2,6 +2,13 @@
 
 All notable changes to Unfold will be documented in this file.
 
+## [1.5.5](https://github.com/maumercado/unfold/compare/v1.5.4...v1.5.5) (2026-04-16)
+
+
+### Bug Fixes
+
+* **ci:** satisfy macOS clippy ([c900c6b](https://github.com/maumercado/unfold/commit/c900c6b7ce062d8e7fadbfcbe7e5a9ad61d5aca3))
+
 ## [1.5.4](https://github.com/maumercado/unfold/compare/v1.5.3...v1.5.4) (2026-04-16)
 
 
