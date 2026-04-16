@@ -14,6 +14,8 @@ mod parse_error;
 mod search;
 mod json_export;
 mod config;
+#[cfg(target_os = "macos")]
+mod macos_open;
 
 use iced::widget::{button, column, container, mouse_area, row, scrollable, stack, text, text_input, Space};
 use iced::{Element, Font, Length, Center, Fill, Color, Size, Task, window, Border, Shadow, Subscription, clipboard, Theme, event, Event};
@@ -131,6 +133,44 @@ fn print_version() {
     println!("unfold {}", env!("CARGO_PKG_VERSION"));
 }
 
+pub(crate) fn spawn_unfold_process(file_path: Option<PathBuf>) {
+    if let Ok(exe_path) = env::current_exe() {
+        let mut cmd = Command::new(exe_path);
+        if let Some(path) = file_path {
+            cmd.arg(path);
+        }
+        let _ = cmd.spawn();
+    }
+}
+
+fn cli_file_argument(args: &[String]) -> Option<PathBuf> {
+    args.get(1).map(PathBuf::from)
+}
+
+#[cfg(target_os = "macos")]
+fn initial_open_paths(args: &[String]) -> Vec<PathBuf> {
+    let pending_paths = macos_open::take_pending_open_files();
+    if pending_paths.is_empty() {
+        cli_file_argument(args).into_iter().collect()
+    } else {
+        pending_paths
+    }
+}
+
+#[cfg(not(target_os = "macos"))]
+fn initial_open_paths(args: &[String]) -> Vec<PathBuf> {
+    cli_file_argument(args).into_iter().collect()
+}
+
+fn split_initial_open_paths(mut paths: Vec<PathBuf>) -> (Option<PathBuf>, Vec<PathBuf>) {
+    if paths.is_empty() {
+        (None, Vec::new())
+    } else {
+        let first = paths.remove(0);
+        (Some(first), paths)
+    }
+}
+
 pub fn main() -> iced::Result {
     // Handle CLI arguments before starting GUI
     let args: Vec<String> = env::args().collect();
@@ -158,6 +198,9 @@ pub fn main() -> iced::Result {
         print_help();
         std::process::exit(0);
     }
+
+    #[cfg(target_os = "macos")]
+    macos_open::install_open_file_handler();
 
     let icon = window::icon::from_file_data(
         include_bytes!("../assets/icon-32.png"),
@@ -288,11 +331,23 @@ impl App {
             config,
         };
 
-        // Check if a file path was passed as CLI argument
         let args: Vec<String> = env::args().collect();
+        let (initial_file, extra_files) = split_initial_open_paths(initial_open_paths(&args));
 
-        if args.len() > 1 {
-            let file_path = PathBuf::from(&args[1]);
+        for extra_file in extra_files {
+            spawn_unfold_process(Some(extra_file));
+        }
+
+        #[cfg(target_os = "macos")]
+        {
+            macos_open::mark_app_ready();
+
+            for late_file in macos_open::take_pending_open_files() {
+                spawn_unfold_process(Some(late_file));
+            }
+        }
+
+        if let Some(file_path) = initial_file {
             (app, Task::done(Message::FileSelected(Some(file_path))))
         } else {
             (app, Task::none())
@@ -914,7 +969,7 @@ impl App {
             }
             Message::FileSelectedForNewWindow(path_option) => {
                 if let Some(file_path) = path_option {
-                    Self::spawn_new_window(Some(file_path));
+                    spawn_unfold_process(Some(file_path));
                 }
                 Task::none()
             }
@@ -1197,17 +1252,6 @@ impl App {
                 self.cli_install_result = None;
                 Task::none()
             }
-        }
-    }
-
-    /// Spawn a new instance of the application, optionally with a file
-    fn spawn_new_window(file_path: Option<PathBuf>) {
-        if let Ok(exe_path) = env::current_exe() {
-            let mut cmd = Command::new(exe_path);
-            if let Some(path) = file_path {
-                cmd.arg(path);
-            }
-            let _ = cmd.spawn();
         }
     }
 
@@ -2305,5 +2349,41 @@ mod tests {
                 }
             }
         }
+    }
+
+    #[test]
+    fn test_split_initial_open_paths_empty() {
+        let (first, remaining) = split_initial_open_paths(Vec::new());
+
+        assert!(first.is_none());
+        assert!(remaining.is_empty());
+    }
+
+    #[test]
+    fn test_split_initial_open_paths_multiple_files() {
+        let paths = vec![
+            PathBuf::from("/tmp/first.json"),
+            PathBuf::from("/tmp/second.json"),
+            PathBuf::from("/tmp/third.json"),
+        ];
+
+        let (first, remaining) = split_initial_open_paths(paths);
+
+        assert_eq!(first, Some(PathBuf::from("/tmp/first.json")));
+        assert_eq!(
+            remaining,
+            vec![PathBuf::from("/tmp/second.json"), PathBuf::from("/tmp/third.json")]
+        );
+    }
+
+    #[test]
+    fn test_cli_file_argument_uses_first_positional_arg() {
+        let args = vec![
+            "unfold".to_string(),
+            "/tmp/package.json".to_string(),
+            "/tmp/ignored.json".to_string(),
+        ];
+
+        assert_eq!(cli_file_argument(&args), Some(PathBuf::from("/tmp/package.json")));
     }
 }
