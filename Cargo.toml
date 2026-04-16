@@ -7,6 +7,9 @@ authors = ["Mauricio Mercado"]
 license = "MIT"
 publish = false  # This is a GUI app, not a library
 
+[lints.rust]
+unexpected_cfgs = { level = "warn", check-cfg = ['cfg(feature, values("cargo-clippy"))'] }
+
 [dependencies]
 iced = { version = "0.14.0", features = ["tokio", "advanced", "image"] }
 rfd = "0.16.0"

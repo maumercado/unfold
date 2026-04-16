@@ -1,4 +1,5 @@
 #![cfg(target_os = "macos")]
+#![allow(unexpected_cfgs)]
 
 use objc::declare::ClassDecl;
 use objc::runtime::{Class, Object, Sel};
@@ -124,7 +125,7 @@ unsafe fn extract_paths_from_event(event: *mut Object) -> Vec<PathBuf> {
 
     for index in 1..=count {
         let descriptor: *mut Object = msg_send![descriptor_list, descriptorAtIndex: index];
-        if let Some(path) = descriptor_to_path(descriptor) {
+        if let Some(path) = unsafe { descriptor_to_path(descriptor) } {
             paths.push(path);
         }
     }
@@ -138,7 +139,7 @@ unsafe fn descriptor_to_path(descriptor: *mut Object) -> Option<PathBuf> {
     }
 
     let direct_url: *mut Object = msg_send![descriptor, fileURLValue];
-    if let Some(path) = nsurl_to_path(direct_url) {
+    if let Some(path) = unsafe { nsurl_to_path(direct_url) } {
         return Some(path);
     }
 
@@ -146,13 +147,13 @@ unsafe fn descriptor_to_path(descriptor: *mut Object) -> Option<PathBuf> {
         msg_send![descriptor, coerceToDescriptorType: TYPE_FILE_URL];
     if !file_url_descriptor.is_null() {
         let coerced_url: *mut Object = msg_send![file_url_descriptor, fileURLValue];
-        if let Some(path) = nsurl_to_path(coerced_url) {
+        if let Some(path) = unsafe { nsurl_to_path(coerced_url) } {
             return Some(path);
         }
     }
 
     let string_value: *mut Object = msg_send![descriptor, stringValue];
-    nsstring_to_string(string_value).map(PathBuf::from)
+    unsafe { nsstring_to_string(string_value) }.map(PathBuf::from)
 }
 
 unsafe fn nsurl_to_path(url: *mut Object) -> Option<PathBuf> {
@@ -161,7 +162,7 @@ unsafe fn nsurl_to_path(url: *mut Object) -> Option<PathBuf> {
     }
 
     let path: *mut Object = msg_send![url, path];
-    nsstring_to_string(path).map(PathBuf::from)
+    unsafe { nsstring_to_string(path) }.map(PathBuf::from)
 }
 
 unsafe fn nsstring_to_string(ns_string: *mut Object) -> Option<String> {
@@ -174,7 +175,7 @@ unsafe fn nsstring_to_string(ns_string: *mut Object) -> Option<String> {
         return None;
     }
 
-    Some(CStr::from_ptr(utf8_ptr).to_string_lossy().into_owned())
+    Some(unsafe { CStr::from_ptr(utf8_ptr) }.to_string_lossy().into_owned())
 }
 
 unsafe fn new_autorelease_pool() -> *mut Object {
