@@ -2,6 +2,13 @@
 
 All notable changes to Unfold will be documented in this file.
 
+## [1.5.4](https://github.com/maumercado/unfold/compare/v1.5.3...v1.5.4) (2026-04-16)
+
+
+### Bug Fixes
+
+* **mac:** open json files from Finder ([b3944ae](https://github.com/maumercado/unfold/commit/b3944ae7e78399cb69c9c3105047b3fdae7a9b81))
+
 ## [1.5.3](https://github.com/maumercado/unfold/compare/v1.5.2...v1.5.3) (2026-04-15)
 
 

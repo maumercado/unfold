@@ -1,6 +1,6 @@
 [package]
 name = "unfold"
-version = "1.5.3"
+version = "1.5.4"
 edition = "2024"
 description = "A high-performance JSON viewer"
 authors = ["Mauricio Mercado"]
