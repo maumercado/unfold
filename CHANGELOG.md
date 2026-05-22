@@ -2,6 +2,13 @@
 
 All notable changes to Unfold will be documented in this file.
 
+## [1.5.6](https://github.com/maumercado/unfold/compare/v1.5.5...v1.5.6) (2026-04-16)
+
+
+### Bug Fixes
+
+* **mac:** handle Finder file open events ([754cc68](https://github.com/maumercado/unfold/commit/754cc6889dde5388c425f70714a951cc9658a777))
+
 ## [1.5.5](https://github.com/maumercado/unfold/compare/v1.5.4...v1.5.5) (2026-04-16)
 
 
