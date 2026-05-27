@@ -44,13 +44,17 @@ fn node_to_json_string_internal(tree: &JsonTree, node_index: usize, minified: bo
             JsonValue::Number(n) => n.to_string(),
             JsonValue::String(s) => format!("\"{}\"", escape_json_string(s)),
             JsonValue::Array => {
-                let items: Vec<String> = node.children.iter()
+                let items: Vec<String> = node
+                    .children
+                    .iter()
                     .map(|&child_idx| node_to_json_string_internal(tree, child_idx, minified))
                     .collect();
                 format!("[{}]", items.join(sep))
             }
             JsonValue::Object => {
-                let items: Vec<String> = node.children.iter()
+                let items: Vec<String> = node
+                    .children
+                    .iter()
                     .filter_map(|&child_idx| {
                         tree.get_node(child_idx).map(|child| {
                             let key = child.key.as_deref().unwrap_or("");
@@ -120,8 +124,14 @@ mod tests {
         let minified = node_to_json_string_minified(&tree, tree.root_index());
 
         // Minified should not have spaces after colons or commas
-        assert!(!minified.contains(": "), "Minified should not have ': ' (colon-space)");
-        assert!(!minified.contains(", "), "Minified should not have ', ' (comma-space)");
+        assert!(
+            !minified.contains(": "),
+            "Minified should not have ': ' (colon-space)"
+        );
+        assert!(
+            !minified.contains(", "),
+            "Minified should not have ', ' (comma-space)"
+        );
 
         // But should still have colons and commas
         assert!(minified.contains(":"), "Should contain colons");
@@ -138,7 +148,10 @@ mod tests {
         let minified = node_to_json_string_minified(&tree, tree.root_index());
 
         // Regular should be longer due to spaces
-        assert!(regular.len() > minified.len(), "Regular should be longer than minified");
+        assert!(
+            regular.len() > minified.len(),
+            "Regular should be longer than minified"
+        );
 
         // Both should produce valid JSON structure
         assert!(regular.starts_with('{'));
@@ -199,10 +212,22 @@ mod tests {
         let num_tree = build_tree(&num_val);
         let str_tree = build_tree(&str_val);
 
-        assert_eq!(node_to_json_string_minified(&null_tree, null_tree.root_index()), "null");
-        assert_eq!(node_to_json_string_minified(&bool_tree, bool_tree.root_index()), "true");
-        assert_eq!(node_to_json_string_minified(&num_tree, num_tree.root_index()), "42");
-        assert_eq!(node_to_json_string_minified(&str_tree, str_tree.root_index()), "\"hello\"");
+        assert_eq!(
+            node_to_json_string_minified(&null_tree, null_tree.root_index()),
+            "null"
+        );
+        assert_eq!(
+            node_to_json_string_minified(&bool_tree, bool_tree.root_index()),
+            "true"
+        );
+        assert_eq!(
+            node_to_json_string_minified(&num_tree, num_tree.root_index()),
+            "42"
+        );
+        assert_eq!(
+            node_to_json_string_minified(&str_tree, str_tree.root_index()),
+            "\"hello\""
+        );
     }
 
     #[test]
@@ -256,7 +281,13 @@ mod tests {
         let obj_tree = build_tree(&empty_obj);
         let arr_tree = build_tree(&empty_arr);
 
-        assert_eq!(node_to_json_string_minified(&obj_tree, obj_tree.root_index()), "{}");
-        assert_eq!(node_to_json_string_minified(&arr_tree, arr_tree.root_index()), "[]");
+        assert_eq!(
+            node_to_json_string_minified(&obj_tree, obj_tree.root_index()),
+            "{}"
+        );
+        assert_eq!(
+            node_to_json_string_minified(&arr_tree, arr_tree.root_index()),
+            "[]"
+        );
     }
 }

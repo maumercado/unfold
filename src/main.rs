@@ -256,7 +256,7 @@ fn initial_open_paths(options: &LaunchOptions) -> Vec<PathBuf> {
 
 #[cfg(not(target_os = "macos"))]
 fn initial_open_paths(options: &LaunchOptions) -> Vec<PathBuf> {
-    options.file_path.clone().into_iter().collect()
+    dedupe_paths(options.file_path.clone().into_iter().collect())
 }
 
 fn split_initial_open_paths(mut paths: Vec<PathBuf>) -> (Option<PathBuf>, Vec<PathBuf>) {
@@ -1654,6 +1654,7 @@ impl App {
         let search_input = text_input("Find...", &self.search_query)
             .id(self.search_input_id.clone())
             .on_input(Message::SearchQueryChanged)
+            .on_paste(Message::SearchQueryChanged)
             .on_submit(Message::SearchSubmit)
             .padding(5)
             .width(Length::Fixed(200.0));

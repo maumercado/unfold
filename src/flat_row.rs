@@ -2,12 +2,12 @@
 //!
 //! Pre-computed row data for efficient rendering of the JSON tree.
 
-use iced::Color;
 use crate::theme::ThemeColors;
+use iced::Color;
 
 /// Virtual scrolling constants
-pub const ROW_HEIGHT: f32 = 16.0;      // Fixed height per row (tight for connected tree lines)
-pub const BUFFER_ROWS: usize = 5;      // Extra rows above/below (reduced for performance)
+pub const ROW_HEIGHT: f32 = 16.0; // Fixed height per row (tight for connected tree lines)
+pub const BUFFER_ROWS: usize = 5; // Extra rows above/below (reduced for performance)
 
 /// Value type for theme-aware coloring
 #[derive(Debug, Clone, Copy)]

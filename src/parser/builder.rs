@@ -1,6 +1,6 @@
-use serde_json::Value;
 use super::node::{JsonNode, JsonValue};
 use super::tree::JsonTree;
+use serde_json::Value;
 
 /// Build a JsonTree from a serde_json::Value
 pub fn build_tree(json: &Value) -> JsonTree {
@@ -17,12 +17,7 @@ pub fn build_tree(json: &Value) -> JsonTree {
 
 /// Recursively build a node and its children
 /// Returns the index of the created node
-fn build_node(
-    tree: &mut JsonTree,
-    key: Option<String>,
-    value: &Value,
-    depth: usize,
-) -> usize {
+fn build_node(tree: &mut JsonTree, key: Option<String>, value: &Value, depth: usize) -> usize {
     // First, determine the JsonValue and collect children
     let (node_value, child_values) = match value {
         Value::Null => (JsonValue::Null, vec![]),
@@ -35,11 +30,11 @@ fn build_node(
         Value::String(s) => (JsonValue::String(s.clone()), vec![]),
         Value::Array(arr) => {
             // Collect array items with index as key: [0], [1], etc.
-            let children: Vec<(Option<String>, &Value)> =
-                arr.iter()
-                    .enumerate()
-                    .map(|(i, v)| (Some(format!("[{}]", i)), v))
-                    .collect();
+            let children: Vec<(Option<String>, &Value)> = arr
+                .iter()
+                .enumerate()
+                .map(|(i, v)| (Some(format!("[{}]", i)), v))
+                .collect();
             (JsonValue::Array, children)
         }
         Value::Object(obj) => {
@@ -53,9 +48,7 @@ fn build_node(
     // Build children first (we need their indices)
     let child_indices: Vec<usize> = child_values
         .into_iter()
-        .map(|(child_key, child_value)| {
-            build_node(tree, child_key, child_value, depth + 1)
-        })
+        .map(|(child_key, child_value)| build_node(tree, child_key, child_value, depth + 1))
         .collect();
 
     // All containers start collapsed for better performance with large files
@@ -67,7 +60,7 @@ fn build_node(
         value: node_value,
         depth,
         children: child_indices,
-        expanded: false,  // Start collapsed - expand on demand
+        expanded: false, // Start collapsed - expand on demand
     };
 
     // Add to tree and return index
@@ -95,7 +88,7 @@ mod tests {
         let value = json!({"name": "Unfold"});
         let tree = build_tree(&value);
 
-        assert_eq!(tree.node_count(), 2);  // Root object + 1 string
+        assert_eq!(tree.node_count(), 2); // Root object + 1 string
     }
 
     #[test]
