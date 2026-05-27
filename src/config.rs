@@ -46,17 +46,15 @@ impl Config {
         };
 
         match fs::read_to_string(&path) {
-            Ok(contents) => {
-                serde_json::from_str(&contents).unwrap_or_default()
-            }
+            Ok(contents) => serde_json::from_str(&contents).unwrap_or_default(),
             Err(_) => Config::default(),
         }
     }
 
     /// Save config to file
     pub fn save(&self) -> Result<(), String> {
-        let dir = Self::config_dir()
-            .ok_or_else(|| "Could not determine home directory".to_string())?;
+        let dir =
+            Self::config_dir().ok_or_else(|| "Could not determine home directory".to_string())?;
 
         // Create config directory if it doesn't exist
         if !dir.exists() {
@@ -64,14 +62,13 @@ impl Config {
                 .map_err(|e| format!("Failed to create config directory: {}", e))?;
         }
 
-        let path = Self::config_path()
-            .ok_or_else(|| "Could not determine config path".to_string())?;
+        let path =
+            Self::config_path().ok_or_else(|| "Could not determine config path".to_string())?;
 
         let json = serde_json::to_string_pretty(self)
             .map_err(|e| format!("Failed to serialize config: {}", e))?;
 
-        fs::write(&path, json)
-            .map_err(|e| format!("Failed to write config: {}", e))?;
+        fs::write(&path, json).map_err(|e| format!("Failed to write config: {}", e))?;
 
         Ok(())
     }

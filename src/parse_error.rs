@@ -8,7 +8,7 @@ pub struct ParseError {
     pub message: String,
     pub line: Option<usize>,
     pub column: Option<usize>,
-    pub context_line: Option<String>,  // The actual line from the file
+    pub context_line: Option<String>, // The actual line from the file
     pub filename: String,
 }
 
@@ -49,5 +49,4 @@ impl ParseError {
             filename: filename.to_string(),
         }
     }
-
 }

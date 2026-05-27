@@ -2,8 +2,8 @@
 //!
 //! Allows users to check if a newer version of Unfold is available.
 
-use serde::Deserialize;
 use semver::Version;
+use serde::Deserialize;
 
 /// State for the update check dialog
 #[derive(Debug, Clone, PartialEq)]
@@ -13,7 +13,10 @@ pub enum UpdateCheckState {
     /// Currently fetching from GitHub
     Checking,
     /// Update available with version string and release URL
-    UpdateAvailable { version: String, release_url: String },
+    UpdateAvailable {
+        version: String,
+        release_url: String,
+    },
     /// Already on latest version
     UpToDate,
     /// Error occurred during check
@@ -69,7 +72,12 @@ pub async fn fetch_latest_release() -> UpdateCheckState {
     };
     let latest_version = match Version::parse(latest_version_str) {
         Ok(v) => v,
-        Err(e) => return UpdateCheckState::Error(format!("Invalid release version '{}': {}", latest_version_str, e)),
+        Err(e) => {
+            return UpdateCheckState::Error(format!(
+                "Invalid release version '{}': {}",
+                latest_version_str, e
+            ));
+        }
     };
 
     // Compare versions
@@ -112,6 +120,9 @@ mod tests {
         let error1 = UpdateCheckState::Error("Network error".to_string());
         let error2 = UpdateCheckState::Error("Network error".to_string());
         assert_eq!(error1, error2);
-        assert_ne!(UpdateCheckState::Error("a".to_string()), UpdateCheckState::Error("b".to_string()));
+        assert_ne!(
+            UpdateCheckState::Error("a".to_string()),
+            UpdateCheckState::Error("b".to_string())
+        );
     }
 }

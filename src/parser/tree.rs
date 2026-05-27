@@ -11,7 +11,7 @@ pub struct JsonTree {
 }
 
 impl JsonTree {
-      /// Create a new empty tree
+    /// Create a new empty tree
     pub fn new() -> Self {
         JsonTree {
             nodes: Vec::new(),
@@ -56,17 +56,19 @@ impl JsonTree {
     /// Toggle the expanded state of a node
     pub fn toggle_expanded(&mut self, index: usize) {
         if let Some(node) = self.nodes.get_mut(index)
-            && node.is_expandable() {
-                node.expanded = !node.expanded;
-            }
+            && node.is_expandable()
+        {
+            node.expanded = !node.expanded;
+        }
     }
 
     /// Set the expanded state of a node explicitly
     pub fn set_expanded(&mut self, index: usize, expanded: bool) {
         if let Some(node) = self.nodes.get_mut(index)
-            && node.is_expandable() {
-                node.expanded = expanded;
-            }
+            && node.is_expandable()
+        {
+            node.expanded = expanded;
+        }
     }
 
     /// Get the root index
@@ -152,7 +154,11 @@ impl JsonTree {
         };
 
         // Write this node
-        let _ = writeln!(output, "{}{}{}{}", prefix, expand_indicator, key_str, value_str);
+        let _ = writeln!(
+            output,
+            "{}{}{}{}",
+            prefix, expand_indicator, key_str, value_str
+        );
 
         // Only print children if expanded
         if node.expanded {
@@ -223,7 +229,7 @@ mod tests {
         assert_eq!(tree.node_count(), 2);
 
         // Check root
-        let root = tree.get_node(1).unwrap();  // Root is at index 1
+        let root = tree.get_node(1).unwrap(); // Root is at index 1
         assert_eq!(root.value, JsonValue::Object);
         assert_eq!(root.children.len(), 1);
 
@@ -272,10 +278,10 @@ mod tests {
 
         let output = tree.print_tree();
 
-        println!("{}", output);  // Will show when running with --nocapture
+        println!("{}", output); // Will show when running with --nocapture
 
         assert!(output.contains("name"));
         assert!(output.contains("Unfold"));
         assert!(output.contains("version"));
-  }
+    }
 }
