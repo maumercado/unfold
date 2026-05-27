@@ -256,7 +256,7 @@ fn initial_open_paths(options: &LaunchOptions) -> Vec<PathBuf> {
 
 #[cfg(not(target_os = "macos"))]
 fn initial_open_paths(options: &LaunchOptions) -> Vec<PathBuf> {
-    options.file_path.clone().into_iter().collect()
+    dedupe_paths(options.file_path.clone().into_iter().collect())
 }
 
 fn split_initial_open_paths(mut paths: Vec<PathBuf>) -> (Option<PathBuf>, Vec<PathBuf>) {
