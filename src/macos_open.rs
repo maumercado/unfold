@@ -14,6 +14,7 @@ const NS_APPLICATION_DELEGATE_REPLY_FAILURE: usize = 2;
 
 static APP_READY: AtomicBool = AtomicBool::new(false);
 static OPEN_FILE_HANDLER_INSTALLED: AtomicBool = AtomicBool::new(false);
+static SPAWN_FROM_OPEN_EVENTS: AtomicBool = AtomicBool::new(true);
 static PENDING_FILES: OnceLock<Mutex<Vec<PathBuf>>> = OnceLock::new();
 
 fn pending_files() -> &'static Mutex<Vec<PathBuf>> {
@@ -45,6 +46,10 @@ pub(crate) fn take_pending_open_files() -> Vec<PathBuf> {
 
 pub(crate) fn mark_app_ready() {
     APP_READY.store(true, Ordering::SeqCst);
+}
+
+pub(crate) fn set_spawn_from_open_events(enabled: bool) {
+    SPAWN_FROM_OPEN_EVENTS.store(enabled, Ordering::SeqCst);
 }
 
 unsafe fn winit_application_delegate_class() -> Option<&'static Class> {
@@ -175,8 +180,12 @@ fn route_opened_paths(paths: Vec<PathBuf>) {
     }
 
     if APP_READY.load(Ordering::SeqCst) {
+        if !SPAWN_FROM_OPEN_EVENTS.load(Ordering::SeqCst) {
+            return;
+        }
+
         for path in paths {
-            crate::spawn_unfold_process(Some(path));
+            crate::spawn_unfold_process_with_options(Some(path), None, true);
         }
     } else {
         let mut pending = pending_files()

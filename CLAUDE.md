@@ -202,6 +202,19 @@ See `docs/DESIGN_DECISIONS.md` for detailed rationale on:
 3. **Modifier Tracking**: Track keyboard modifiers globally for Shift+Enter in text input
 4. **Widget Operations**: Use `operate(focusable::focus(id))` for programmatic focus
 
+## Recent Architecture Decisions
+
+### Launch Options for Multi-Window Behavior
+
+- Child windows are launched as new processes with explicit launch options (`--window-x`, `--window-y`, `--spawn-handoff`).
+- Window position is tracked from runtime window events and new windows use a fixed cascade offset (`+32,+32`).
+- File-open handoff children on macOS disable open-event spawning to prevent recursive process loops.
+
+### Event Routing Strategy
+
+- Keyboard handling now routes through `event::listen_with` with event status.
+- App-level shortcuts only run for ignored events to avoid conflicting with focused widget input behavior.
+
 ## Performance Considerations
 
 - **Virtual scrolling**: Only visible rows are rendered

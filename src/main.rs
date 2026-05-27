@@ -4,43 +4,72 @@
 // Has no effect on macOS/Linux.
 #![windows_subsystem = "windows"]
 
-mod parser;
-mod theme;
-mod menu;
-mod message;
-mod update_check;
-mod flat_row;
-mod parse_error;
-mod search;
-mod json_export;
 mod config;
+mod flat_row;
+mod json_export;
 #[cfg(target_os = "macos")]
 mod macos_open;
+mod menu;
+mod message;
+mod parse_error;
+mod parser;
+mod search;
+mod theme;
+mod update_check;
 
-use iced::widget::{button, column, container, mouse_area, row, scrollable, stack, text, text_input, Space};
-use iced::{Element, Font, Length, Center, Fill, Color, Size, Task, window, Border, Shadow, Subscription, clipboard, Theme, event, Event};
-use iced::border::Radius;
-use iced::advanced::widget::{Id as WidgetId, operate};
-use iced::advanced::widget::operation::scrollable::{scroll_to, AbsoluteOffset};
 use iced::advanced::widget::operation::focusable;
+use iced::advanced::widget::operation::scrollable::{AbsoluteOffset, scroll_to};
+use iced::advanced::widget::{Id as WidgetId, operate};
+use iced::border::Radius;
 use iced::keyboard::{self, Key, Modifiers, key::Named};
 use iced::widget::button::Status as ButtonStatus;
+use iced::widget::{
+    Space, button, column, container, mouse_area, row, scrollable, stack, text, text_input,
+};
+use iced::{
+    Border, Center, Color, Element, Event, Fill, Font, Length, Point, Shadow, Size, Subscription,
+    Task, Theme, clipboard, event, window,
+};
 use std::collections::HashSet;
+use std::env;
 use std::fs;
 use std::path::PathBuf;
-use std::time::{Duration, Instant};
-use std::env;
 use std::process::Command;
+use std::time::{Duration, Instant};
+
+const WINDOW_CASCADE_OFFSET: f32 = 32.0;
+const ARG_WINDOW_X: &str = "--window-x";
+const ARG_WINDOW_Y: &str = "--window-y";
+const ARG_SPAWN_HANDOFF: &str = "--spawn-handoff";
+
+#[derive(Debug, Clone, Default)]
+struct LaunchOptions {
+    file_path: Option<PathBuf>,
+    window_x: Option<f32>,
+    window_y: Option<f32>,
+    spawn_handoff: bool,
+}
+
+impl LaunchOptions {
+    fn window_position(&self) -> Option<Point> {
+        match (self.window_x, self.window_y) {
+            (Some(x), Some(y)) => Some(Point::new(x, y)),
+            _ => None,
+        }
+    }
+}
 
 // Re-export from modules
-use theme::{AppTheme, ThemeColors, get_theme_colors, button_3d_style_themed, button_toggle_style_themed};
+use config::Config;
+use flat_row::{BUFFER_ROWS, FlatRow, ROW_HEIGHT, ValueType};
 use menu::try_initialize_menu;
-use message::{Message, ContextSubmenu};
-use update_check::{UpdateCheckState, fetch_latest_release};
-use flat_row::{FlatRow, ValueType, ROW_HEIGHT, BUFFER_ROWS};
+use message::{ContextSubmenu, Message};
 use parse_error::ParseError;
 use parser::{JsonTree, JsonValue};
-use config::Config;
+use theme::{
+    AppTheme, ThemeColors, button_3d_style_themed, button_toggle_style_themed, get_theme_colors,
+};
+use update_check::{UpdateCheckState, fetch_latest_release};
 
 /// Install the CLI tool by creating a symlink in /usr/local/bin
 /// Uses osascript on macOS to prompt for admin privileges
@@ -49,8 +78,8 @@ fn install_cli_tool() -> Result<String, String> {
     let target_path = "/usr/local/bin/unfold";
 
     // Get the path to the current executable
-    let exe_path = env::current_exe()
-        .map_err(|e| format!("Failed to get executable path: {}", e))?;
+    let exe_path =
+        env::current_exe().map_err(|e| format!("Failed to get executable path: {}", e))?;
 
     let source_path = exe_path.to_string_lossy();
 
@@ -91,8 +120,8 @@ fn install_cli_tool() -> Result<String, String> {
     use std::os::unix::fs::symlink;
 
     let target_path = PathBuf::from("/usr/local/bin/unfold");
-    let exe_path = env::current_exe()
-        .map_err(|e| format!("Failed to get executable path: {}", e))?;
+    let exe_path =
+        env::current_exe().map_err(|e| format!("Failed to get executable path: {}", e))?;
 
     // Try direct symlink first, suggest sudo if it fails
     if target_path.exists() || target_path.is_symlink() {
@@ -101,12 +130,11 @@ fn install_cli_tool() -> Result<String, String> {
 
     match symlink(&exe_path, &target_path) {
         Ok(()) => Ok("CLI installed! You can now use 'unfold' from the terminal.".to_string()),
-        Err(e) if e.kind() == std::io::ErrorKind::PermissionDenied => {
-            Err(format!(
-                "Permission denied. Run this command in terminal:\nsudo ln -sf \"{}\" \"{}\"",
-                exe_path.display(), target_path.display()
-            ))
-        }
+        Err(e) if e.kind() == std::io::ErrorKind::PermissionDenied => Err(format!(
+            "Permission denied. Run this command in terminal:\nsudo ln -sf \"{}\" \"{}\"",
+            exe_path.display(),
+            target_path.display()
+        )),
         Err(e) => Err(format!("Failed to create symlink: {}", e)),
     }
 }
@@ -133,9 +161,23 @@ fn print_version() {
     println!("unfold {}", env!("CARGO_PKG_VERSION"));
 }
 
-pub(crate) fn spawn_unfold_process(file_path: Option<PathBuf>) {
+pub(crate) fn spawn_unfold_process_with_options(
+    file_path: Option<PathBuf>,
+    window_position: Option<Point>,
+    spawn_handoff: bool,
+) {
     if let Ok(exe_path) = env::current_exe() {
         let mut cmd = Command::new(exe_path);
+
+        if let Some(position) = window_position {
+            cmd.arg(ARG_WINDOW_X).arg(position.x.to_string());
+            cmd.arg(ARG_WINDOW_Y).arg(position.y.to_string());
+        }
+
+        if spawn_handoff {
+            cmd.arg(ARG_SPAWN_HANDOFF);
+        }
+
         if let Some(path) = file_path {
             cmd.arg(path);
         }
@@ -143,23 +185,78 @@ pub(crate) fn spawn_unfold_process(file_path: Option<PathBuf>) {
     }
 }
 
-fn cli_file_argument(args: &[String]) -> Option<PathBuf> {
-    args.get(1).map(PathBuf::from)
+fn parse_launch_options(args: &[String]) -> LaunchOptions {
+    let mut options = LaunchOptions::default();
+    let mut i = 1;
+
+    while i < args.len() {
+        match args[i].as_str() {
+            ARG_SPAWN_HANDOFF => {
+                options.spawn_handoff = true;
+                i += 1;
+            }
+            ARG_WINDOW_X => {
+                if let Some(value) = args.get(i + 1)
+                    && let Ok(parsed) = value.parse::<f32>()
+                {
+                    options.window_x = Some(parsed);
+                }
+                i += 2;
+            }
+            ARG_WINDOW_Y => {
+                if let Some(value) = args.get(i + 1)
+                    && let Ok(parsed) = value.parse::<f32>()
+                {
+                    options.window_y = Some(parsed);
+                }
+                i += 2;
+            }
+            arg if arg.starts_with('-') => {
+                i += 1;
+            }
+            path => {
+                if options.file_path.is_none() {
+                    options.file_path = Some(PathBuf::from(path));
+                }
+                i += 1;
+            }
+        }
+    }
+
+    options
+}
+
+fn dedupe_paths(paths: Vec<PathBuf>) -> Vec<PathBuf> {
+    let mut unique = Vec::new();
+    let mut seen = HashSet::new();
+
+    for path in paths {
+        if seen.insert(path.clone()) {
+            unique.push(path);
+        }
+    }
+
+    unique
 }
 
 #[cfg(target_os = "macos")]
-fn initial_open_paths(args: &[String]) -> Vec<PathBuf> {
-    let pending_paths = macos_open::take_pending_open_files();
-    if pending_paths.is_empty() {
-        cli_file_argument(args).into_iter().collect()
-    } else {
-        pending_paths
+fn initial_open_paths(options: &LaunchOptions) -> Vec<PathBuf> {
+    if options.spawn_handoff {
+        return options.file_path.clone().into_iter().collect();
     }
+
+    let mut paths = Vec::new();
+    if let Some(file_path) = options.file_path.clone() {
+        paths.push(file_path);
+    }
+    paths.extend(macos_open::take_pending_open_files());
+
+    dedupe_paths(paths)
 }
 
 #[cfg(not(target_os = "macos"))]
-fn initial_open_paths(args: &[String]) -> Vec<PathBuf> {
-    cli_file_argument(args).into_iter().collect()
+fn initial_open_paths(options: &LaunchOptions) -> Vec<PathBuf> {
+    options.file_path.clone().into_iter().collect()
 }
 
 fn split_initial_open_paths(mut paths: Vec<PathBuf>) -> (Option<PathBuf>, Vec<PathBuf>) {
@@ -174,6 +271,7 @@ fn split_initial_open_paths(mut paths: Vec<PathBuf>) -> (Option<PathBuf>, Vec<Pa
 pub fn main() -> iced::Result {
     // Handle CLI arguments before starting GUI
     let args: Vec<String> = env::args().collect();
+    let launch_options = parse_launch_options(&args);
 
     // Check for flags first
     for arg in &args[1..] {
@@ -190,40 +288,36 @@ pub fn main() -> iced::Result {
         }
     }
 
-    // If running from terminal with no file argument, show help
-    // Check if stdout is a TTY (terminal) vs launched from GUI
-    use std::io::IsTerminal;
-    if args.len() == 1 && std::io::stdout().is_terminal() {
-        // No file provided and running in terminal - show help
-        print_help();
-        std::process::exit(0);
-    }
+    // No automatic help-on-empty-args behavior.
+    // Launch GUI when no file is provided; users can still request help via --help.
 
     #[cfg(target_os = "macos")]
     macos_open::install_open_file_handler();
 
-    let icon = window::icon::from_file_data(
-        include_bytes!("../assets/icon-32.png"),
-        None,
-    ).ok();
+    let icon = window::icon::from_file_data(include_bytes!("../assets/icon-32.png"), None).ok();
+
+    let mut window_settings = window::Settings {
+        icon,
+        ..Default::default()
+    };
+
+    if let Some(position) = launch_options.window_position() {
+        window_settings.position = window::Position::Specific(position);
+    }
 
     iced::application(App::boot, App::update, App::view)
-        .window(window::Settings {
-            icon,
-            ..Default::default()
-        })
+        .window(window_settings)
         .window_size((900.0, 700.0))
         .resizable(true)
-        .title(|app: &App| {
-            match &app.current_file {
-                Some(path) => {
-                    let filename = path.file_name()
-                        .map(|n| n.to_string_lossy().to_string())
-                        .unwrap_or_else(|| "unknown".to_string());
-                    format!("{} - Unfold", filename)
-                }
-                None => String::from("Unfold - JSON Viewer")
+        .title(|app: &App| match &app.current_file {
+            Some(path) => {
+                let filename = path
+                    .file_name()
+                    .map(|n| n.to_string_lossy().to_string())
+                    .unwrap_or_else(|| "unknown".to_string());
+                format!("{} - Unfold", filename)
             }
+            None => String::from("Unfold - JSON Viewer"),
         })
         .subscription(App::subscription)
         .run()
@@ -260,6 +354,8 @@ struct App {
     search_input_id: WidgetId,
     /// Track current keyboard modifiers (for Shift+Enter in search input)
     current_modifiers: Modifiers,
+    /// Last known window position (used for cascading new windows)
+    last_window_position: Option<Point>,
     /// Currently selected node (for copy, path display, etc.)
     selected_node: Option<usize>,
     /// Parse error details (for better error display)
@@ -304,12 +400,18 @@ impl App {
         #[cfg(target_os = "macos")]
         macos_open::install_open_file_handler();
 
+        let args: Vec<String> = env::args().collect();
+        let launch_options = parse_launch_options(&args);
+
+        #[cfg(target_os = "macos")]
+        macos_open::set_spawn_from_open_events(!launch_options.spawn_handoff);
+
         let app = App {
             tree: None,
             status: String::from("No file loaded"),
             current_file: None,
             preferences: Preferences::default(),
-            theme: config.theme,  // Use saved theme
+            theme: config.theme, // Use saved theme
             load_time: None,
             flat_rows: Vec::new(),
             viewport_height: 600.0,
@@ -324,6 +426,7 @@ impl App {
             tree_scrollable_id: WidgetId::unique(),
             search_input_id: WidgetId::unique(),
             current_modifiers: Modifiers::default(),
+            last_window_position: launch_options.window_position(),
             selected_node: None,
             parse_error: None,
             show_help: false,
@@ -334,19 +437,21 @@ impl App {
             config,
         };
 
-        let args: Vec<String> = env::args().collect();
-        let (initial_file, extra_files) = split_initial_open_paths(initial_open_paths(&args));
+        let (initial_file, extra_files) =
+            split_initial_open_paths(initial_open_paths(&launch_options));
 
         for extra_file in extra_files {
-            spawn_unfold_process(Some(extra_file));
+            spawn_unfold_process_with_options(Some(extra_file), None, true);
         }
 
         #[cfg(target_os = "macos")]
         {
             macos_open::mark_app_ready();
 
-            for late_file in macos_open::take_pending_open_files() {
-                spawn_unfold_process(Some(late_file));
+            if !launch_options.spawn_handoff {
+                for late_file in dedupe_paths(macos_open::take_pending_open_files()) {
+                    spawn_unfold_process_with_options(Some(late_file), None, true);
+                }
             }
         }
 
@@ -362,30 +467,27 @@ impl App {
         try_initialize_menu();
 
         Subscription::batch([
-            // Keyboard events subscription
-            keyboard::listen().filter_map(|event| {
-                match event {
-                    keyboard::Event::KeyPressed { key, modifiers, .. } => {
-                        Some(Message::KeyPressed(key, modifiers))
-                    }
-                    keyboard::Event::ModifiersChanged(modifiers) => {
-                        Some(Message::ModifiersChanged(modifiers))
-                    }
-                    _ => None
+            // Event subscription - keyboard, file drops, and window position
+            event::listen_with(|event, status, _window_id| match event {
+                Event::Keyboard(keyboard::Event::KeyPressed { key, modifiers, .. }) => {
+                    Some(Message::KeyPressed(key, modifiers, status))
                 }
-            }),
-            // Window events subscription - listen for file drops
-            event::listen().filter_map(|event| {
-                if let Event::Window(window::Event::FileDropped(path)) = event {
-                    Some(Message::FileDropped(path))
-                } else {
-                    None
+                Event::Keyboard(keyboard::Event::ModifiersChanged(modifiers)) => {
+                    Some(Message::ModifiersChanged(modifiers))
                 }
+                Event::Window(window::Event::FileDropped(path)) => Some(Message::FileDropped(path)),
+                Event::Window(window::Event::Opened {
+                    position: Some(position),
+                    ..
+                }) => Some(Message::WindowPositionUpdated(position)),
+                Event::Window(window::Event::Moved(position)) => {
+                    Some(Message::WindowPositionUpdated(position))
+                }
+                _ => None,
             }),
             // Menu events subscription - poll for native menu events every 50ms
-            iced::time::every(std::time::Duration::from_millis(50)).map(|_| {
-                menu::try_receive_menu_event().unwrap_or(Message::NoOp)
-            }),
+            iced::time::every(std::time::Duration::from_millis(50))
+                .map(|_| menu::try_receive_menu_event().unwrap_or(Message::NoOp)),
         ])
     }
 
@@ -405,7 +507,15 @@ impl App {
                 } else {
                     String::new()
                 };
-                Self::flatten_node(tree, child_index, &mut rows, "", is_last, false, &child_path);
+                Self::flatten_node(
+                    tree,
+                    child_index,
+                    &mut rows,
+                    "",
+                    is_last,
+                    false,
+                    &child_path,
+                );
             }
         }
 
@@ -430,7 +540,11 @@ impl App {
             (String::new(), String::new())
         } else if node.depth == 1 {
             let connector = if is_last { "└" } else { "├" };
-            let child = if is_last { "   ".to_string() } else { "│  ".to_string() };
+            let child = if is_last {
+                "   ".to_string()
+            } else {
+                "│  ".to_string()
+            };
             (connector.to_string(), child)
         } else {
             let connector = if is_last { "└" } else { "├" };
@@ -499,7 +613,15 @@ impl App {
                 } else {
                     current_path.to_string()
                 };
-                Self::flatten_node(tree, child_index, rows, &child_prefix, is_last_child, false, &child_path);
+                Self::flatten_node(
+                    tree,
+                    child_index,
+                    rows,
+                    &child_prefix,
+                    is_last_child,
+                    false,
+                    &child_path,
+                );
             }
         }
     }
@@ -536,7 +658,11 @@ impl App {
         segments
             .into_iter()
             .map(|(seg, is_match)| {
-                let color = if is_match { highlight_color } else { base_color };
+                let color = if is_match {
+                    highlight_color
+                } else {
+                    base_color
+                };
                 text(seg).font(Font::MONOSPACE).size(13).color(color).into()
             })
             .collect()
@@ -549,7 +675,8 @@ impl App {
 
         let is_selected = self.selected_node == Some(flat_row.node_index);
         let is_match = self.search_matches.contains(&flat_row.node_index);
-        let is_current_result = self.search_result_index
+        let is_current_result = self
+            .search_result_index
             .map(|i| self.search_results.get(i) == Some(&flat_row.node_index))
             .unwrap_or(false);
         let is_search_row = is_match || is_current_result;
@@ -558,12 +685,24 @@ impl App {
             let indicator = if flat_row.is_expanded { "⊟ " } else { "⊞ " };
 
             let mut row_elements: Vec<Element<'a, Message>> = vec![
-                text(flat_row.prefix.clone()).font(Font::MONOSPACE).size(13).color(colors.bracket).into(),
-                text(indicator).font(Font::MONOSPACE).size(13).color(colors.indicator).into(),
+                text(flat_row.prefix.clone())
+                    .font(Font::MONOSPACE)
+                    .size(13)
+                    .color(colors.bracket)
+                    .into(),
+                text(indicator)
+                    .font(Font::MONOSPACE)
+                    .size(13)
+                    .color(colors.indicator)
+                    .into(),
             ];
 
             if let Some(k) = &flat_row.key {
-                let display_key = if k.is_empty() { "\"\"".to_string() } else { k.clone() };
+                let display_key = if k.is_empty() {
+                    "\"\"".to_string()
+                } else {
+                    k.clone()
+                };
                 row_elements.extend(self.render_highlighted_text(
                     &display_key,
                     colors.key,
@@ -575,7 +714,7 @@ impl App {
                         .font(Font::MONOSPACE)
                         .size(13)
                         .color(colors.bracket)
-                        .into()
+                        .into(),
                 );
             }
 
@@ -595,12 +734,24 @@ impl App {
                 .into()
         } else {
             let mut row_elements: Vec<Element<'a, Message>> = vec![
-                text(flat_row.prefix.clone()).font(Font::MONOSPACE).size(13).color(colors.bracket).into(),
-                text("─ ").font(Font::MONOSPACE).size(13).color(colors.bracket).into(),
+                text(flat_row.prefix.clone())
+                    .font(Font::MONOSPACE)
+                    .size(13)
+                    .color(colors.bracket)
+                    .into(),
+                text("─ ")
+                    .font(Font::MONOSPACE)
+                    .size(13)
+                    .color(colors.bracket)
+                    .into(),
             ];
 
             if let Some(k) = &flat_row.key {
-                let display_key = if k.is_empty() { "\"\"".to_string() } else { k.clone() };
+                let display_key = if k.is_empty() {
+                    "\"\"".to_string()
+                } else {
+                    k.clone()
+                };
                 row_elements.extend(self.render_highlighted_text(
                     &display_key,
                     colors.key,
@@ -612,7 +763,7 @@ impl App {
                         .font(Font::MONOSPACE)
                         .size(13)
                         .color(colors.bracket)
-                        .into()
+                        .into(),
                 );
             }
 
@@ -643,26 +794,23 @@ impl App {
         };
 
         let row_container = match background_color {
-            Some(color) => {
-                container(node_row)
-                    .width(Length::Fixed(5000.0))
-                    .height(Length::Fixed(ROW_HEIGHT))
-                    .style(move |_theme| container::Style {
-                        background: Some(color.into()),
-                        ..Default::default()
-                    })
-            }
-            None => {
-                container(node_row)
-                    .width(Length::Fixed(5000.0))
-                    .height(Length::Fixed(ROW_HEIGHT))
-            }
+            Some(color) => container(node_row)
+                .width(Length::Fixed(5000.0))
+                .height(Length::Fixed(ROW_HEIGHT))
+                .style(move |_theme| container::Style {
+                    background: Some(color.into()),
+                    ..Default::default()
+                }),
+            None => container(node_row)
+                .width(Length::Fixed(5000.0))
+                .height(Length::Fixed(ROW_HEIGHT)),
         };
 
         let node_index = flat_row.node_index;
         let row_index = flat_row.row_index;
         let toolbar_height = 60.0;
-        let y_pos = toolbar_height + (row_index as f32 * ROW_HEIGHT) - self.scroll_offset + ROW_HEIGHT;
+        let y_pos =
+            toolbar_height + (row_index as f32 * ROW_HEIGHT) - self.scroll_offset + ROW_HEIGHT;
         let estimated_depth = flat_row.prefix.len() / 4;
         let x_pos = 50.0 + (estimated_depth as f32 * 15.0);
 
@@ -706,7 +854,8 @@ impl App {
         let this_line = prefix_len + indicator_len + key_len + value_len;
 
         let max_child = if node.expanded {
-            node.children.iter()
+            node.children
+                .iter()
                 .map(|&child_idx| self.max_line_chars(tree, child_idx, depth + 1))
                 .max()
                 .unwrap_or(0)
@@ -720,81 +869,84 @@ impl App {
     /// Handle messages and update state
     fn update(&mut self, message: Message) -> Task<Message> {
         match message {
-            Message::OpenFileDialog => {
-                Task::perform(
-                    async {
-                        let file = rfd::AsyncFileDialog::new()
-                            .add_filter("JSON", &["json"])
-                            .add_filter("All Files", &["*"])
-                            .set_title("Open JSON File")
-                            .pick_file()
-                            .await;
-                        file.map(|f| f.path().to_path_buf())
-                    },
-                    Message::FileSelected,
-                )
-            }
-            Message::FileSelected(path_option) => {
-                match path_option {
-                    Some(path) => {
-                        let start = Instant::now();
-                        match fs::read_to_string(&path) {
-                            Ok(contents) => {
-                                match serde_json::from_str::<serde_json::Value>(&contents) {
-                                    Ok(json_value) => {
-                                        let tree = parser::build_tree(&json_value);
-                                        let elapsed = start.elapsed();
-                                        let filename = path.file_name()
-                                            .map(|n| n.to_string_lossy().to_string())
-                                            .unwrap_or_else(|| "unknown".to_string());
-                                        self.status = format!("✓ {} ({} nodes)", filename, tree.node_count());
-                                        self.tree = Some(tree);
-                                        self.current_file = Some(path);
-                                        self.load_time = Some(elapsed);
-                                        self.parse_error = None;
+            Message::OpenFileDialog => Task::perform(
+                async {
+                    let file = rfd::AsyncFileDialog::new()
+                        .add_filter("JSON", &["json"])
+                        .add_filter("All Files", &["*"])
+                        .set_title("Open JSON File")
+                        .pick_file()
+                        .await;
+                    file.map(|f| f.path().to_path_buf())
+                },
+                Message::FileSelected,
+            ),
+            Message::FileSelected(path_option) => match path_option {
+                Some(path) => {
+                    let start = Instant::now();
+                    match fs::read_to_string(&path) {
+                        Ok(contents) => {
+                            match serde_json::from_str::<serde_json::Value>(&contents) {
+                                Ok(json_value) => {
+                                    let tree = parser::build_tree(&json_value);
+                                    let elapsed = start.elapsed();
+                                    let filename = path
+                                        .file_name()
+                                        .map(|n| n.to_string_lossy().to_string())
+                                        .unwrap_or_else(|| "unknown".to_string());
+                                    self.status =
+                                        format!("✓ {} ({} nodes)", filename, tree.node_count());
+                                    self.tree = Some(tree);
+                                    self.current_file = Some(path);
+                                    self.load_time = Some(elapsed);
+                                    self.parse_error = None;
 
-                                        self.flat_rows = Self::flatten_visible_nodes(self.tree.as_ref().unwrap());
+                                    self.flat_rows =
+                                        Self::flatten_visible_nodes(self.tree.as_ref().unwrap());
 
-                                        let new_width = self.calculate_max_width();
-                                        return window::latest()
-                                            .and_then(move |window_id| {
-                                                window::resize(window_id, Size::new(new_width, 700.0))
-                                            });
-                                    }
-                                    Err(e) => {
-                                        let filename = path.file_name()
-                                            .map(|n| n.to_string_lossy().to_string())
-                                            .unwrap_or_else(|| "unknown".to_string());
-                                        self.parse_error = Some(ParseError::from_serde_error(&e, &contents, &filename));
-                                        self.status = format!("✗ Parse error in {}", filename);
-                                        self.tree = None;
-                                        self.current_file = None;
-                                    }
+                                    let new_width = self.calculate_max_width();
+                                    return window::latest().and_then(move |window_id| {
+                                        window::resize(window_id, Size::new(new_width, 700.0))
+                                    });
+                                }
+                                Err(e) => {
+                                    let filename = path
+                                        .file_name()
+                                        .map(|n| n.to_string_lossy().to_string())
+                                        .unwrap_or_else(|| "unknown".to_string());
+                                    self.parse_error = Some(ParseError::from_serde_error(
+                                        &e, &contents, &filename,
+                                    ));
+                                    self.status = format!("✗ Parse error in {}", filename);
+                                    self.tree = None;
+                                    self.current_file = None;
                                 }
                             }
-                            Err(e) => {
-                                let filename = path.file_name()
-                                    .map(|n| n.to_string_lossy().to_string())
-                                    .unwrap_or_else(|| "unknown".to_string());
-                                self.parse_error = Some(parse_error::ParseError {
-                                    message: e.to_string(),
-                                    line: None,
-                                    column: None,
-                                    context_line: None,
-                                    filename,
-                                });
-                                self.status = format!("✗ File error: {}", e);
-                                self.tree = None;
-                                self.current_file = None;
-                            }
                         }
-                        Task::none()
+                        Err(e) => {
+                            let filename = path
+                                .file_name()
+                                .map(|n| n.to_string_lossy().to_string())
+                                .unwrap_or_else(|| "unknown".to_string());
+                            self.parse_error = Some(parse_error::ParseError {
+                                message: e.to_string(),
+                                line: None,
+                                column: None,
+                                context_line: None,
+                                filename,
+                            });
+                            self.status = format!("✗ File error: {}", e);
+                            self.tree = None;
+                            self.current_file = None;
+                        }
                     }
-                    None => Task::none()
+                    Task::none()
                 }
-            }
+                None => Task::none(),
+            },
             Message::FileDropped(path) => {
-                let is_json = path.extension()
+                let is_json = path
+                    .extension()
                     .map(|ext| ext.to_string_lossy().to_lowercase())
                     .map(|ext| ext == "json")
                     .unwrap_or(false);
@@ -802,7 +954,8 @@ impl App {
                 if is_json {
                     self.update(Message::FileSelected(Some(path)))
                 } else {
-                    let filename = path.file_name()
+                    let filename = path
+                        .file_name()
                         .map(|n| n.to_string_lossy().to_string())
                         .unwrap_or_else(|| "unknown".to_string());
                     self.status = format!("✗ Not a JSON file: {}", filename);
@@ -888,11 +1041,13 @@ impl App {
                 self.search_regex_error = None;
                 Task::none()
             }
-            Message::FocusSearch => {
-                operate(focusable::focus(self.search_input_id.clone()))
-            }
+            Message::FocusSearch => operate(focusable::focus(self.search_input_id.clone())),
             Message::ModifiersChanged(modifiers) => {
                 self.current_modifiers = modifiers;
+                Task::none()
+            }
+            Message::WindowPositionUpdated(position) => {
+                self.last_window_position = Some(position);
                 Task::none()
             }
             Message::SearchSubmit => {
@@ -902,7 +1057,11 @@ impl App {
                     self.update(Message::SearchNext)
                 }
             }
-            Message::KeyPressed(key, modifiers) => {
+            Message::KeyPressed(key, modifiers, status) => {
+                if status == event::Status::Captured {
+                    return Task::none();
+                }
+
                 let cmd_or_ctrl = modifiers.command() || modifiers.control();
 
                 match key {
@@ -936,12 +1095,30 @@ impl App {
                         self.update(Message::FocusSearch)
                     }
                     Key::Character(c) if c.as_str() == "n" && cmd_or_ctrl => {
-                        self.update(Message::OpenFileInNewWindow)
+                        self.update(Message::OpenEmptyWindow)
                     }
-                    Key::Character(c) if c.as_str() == "c" && cmd_or_ctrl && !modifiers.shift() && !modifiers.alt() => {
+                    Key::Character(c)
+                        if c.as_str() == "v"
+                            && cmd_or_ctrl
+                            && !modifiers.shift()
+                            && !modifiers.alt() =>
+                    {
+                        self.update(Message::PasteSearchFromClipboard)
+                    }
+                    Key::Character(c)
+                        if c.as_str() == "c"
+                            && cmd_or_ctrl
+                            && !modifiers.shift()
+                            && !modifiers.alt() =>
+                    {
                         self.update(Message::CopySelectedValue)
                     }
-                    Key::Character(c) if c.as_str() == "c" && cmd_or_ctrl && modifiers.shift() && !modifiers.alt() => {
+                    Key::Character(c)
+                        if c.as_str() == "c"
+                            && cmd_or_ctrl
+                            && modifiers.shift()
+                            && !modifiers.alt() =>
+                    {
                         self.update(Message::CopySelectedName)
                     }
                     Key::Character(c) if c.as_str() == "c" && cmd_or_ctrl && modifiers.alt() => {
@@ -950,29 +1127,47 @@ impl App {
                     Key::Character(c) if c.as_str() == "t" && cmd_or_ctrl => {
                         self.update(Message::ToggleTheme)
                     }
-                    Key::Character(c) if (c.as_str() == "/" || c.as_str() == "?") && cmd_or_ctrl => {
+                    Key::Character(c)
+                        if (c.as_str() == "/" || c.as_str() == "?") && cmd_or_ctrl =>
+                    {
                         self.update(Message::ToggleHelp)
                     }
-                    _ => Task::none()
+                    _ => Task::none(),
                 }
             }
-            Message::OpenFileInNewWindow => {
-                Task::perform(
-                    async {
-                        let file = rfd::AsyncFileDialog::new()
-                            .add_filter("JSON", &["json"])
-                            .add_filter("All Files", &["*"])
-                            .set_title("Open JSON File in New Window")
-                            .pick_file()
-                            .await;
-                        file.map(|f| f.path().to_path_buf())
-                    },
-                    Message::FileSelectedForNewWindow,
-                )
+            Message::OpenEmptyWindow => {
+                let next_position = self.next_window_position();
+                spawn_unfold_process_with_options(None, next_position, false);
+                Task::none()
             }
+            Message::OpenFileInNewWindow => Task::perform(
+                async {
+                    let file = rfd::AsyncFileDialog::new()
+                        .add_filter("JSON", &["json"])
+                        .add_filter("All Files", &["*"])
+                        .set_title("Open JSON File in New Window")
+                        .pick_file()
+                        .await;
+                    file.map(|f| f.path().to_path_buf())
+                },
+                Message::FileSelectedForNewWindow,
+            ),
             Message::FileSelectedForNewWindow(path_option) => {
                 if let Some(file_path) = path_option {
-                    spawn_unfold_process(Some(file_path));
+                    let next_position = self.next_window_position();
+                    spawn_unfold_process_with_options(Some(file_path), next_position, false);
+                }
+                Task::none()
+            }
+            Message::PasteSearchFromClipboard => {
+                clipboard::read().map(Message::SearchClipboardPasted)
+            }
+            Message::SearchClipboardPasted(text_option) => {
+                if let Some(text) = text_option
+                    && !text.is_empty()
+                {
+                    self.search_query.push_str(&text);
+                    return self.run_search();
                 }
                 Task::none()
             }
@@ -987,27 +1182,31 @@ impl App {
             Message::CopySelectedValue => {
                 self.context_menu_state = None;
                 if let (Some(tree), Some(node_index)) = (&self.tree, self.selected_node)
-                    && tree.get_node(node_index).is_some() {
-                        let value_string = json_export::format_node_value_for_copy(tree, node_index);
-                        return clipboard::write(value_string);
-                    }
+                    && tree.get_node(node_index).is_some()
+                {
+                    let value_string = json_export::format_node_value_for_copy(tree, node_index);
+                    return clipboard::write(value_string);
+                }
                 Task::none()
             }
             Message::CopySelectedPath => {
                 self.context_menu_state = None;
                 if let Some(node_index) = self.selected_node
-                    && let Some(flat_row) = self.flat_rows.iter().find(|r| r.node_index == node_index) {
-                        return clipboard::write(flat_row.path.clone());
-                    }
+                    && let Some(flat_row) =
+                        self.flat_rows.iter().find(|r| r.node_index == node_index)
+                {
+                    return clipboard::write(flat_row.path.clone());
+                }
                 Task::none()
             }
             Message::CopySelectedName => {
                 self.context_menu_state = None;
                 if let (Some(tree), Some(node_index)) = (&self.tree, self.selected_node)
                     && let Some(node) = tree.get_node(node_index)
-                        && let Some(key) = &node.key {
-                            return clipboard::write(key.clone());
-                        }
+                    && let Some(key) = &node.key
+                {
+                    return clipboard::write(key.clone());
+                }
                 Task::none()
             }
             Message::ToggleTheme => {
@@ -1071,7 +1270,7 @@ impl App {
                                 let _ = fs::write(handle.path(), json_string);
                             }
                         },
-                        |_| Message::NoOp
+                        |_| Message::NoOp,
                     )
                 } else {
                     Task::none()
@@ -1149,9 +1348,10 @@ impl App {
                 if let (Some(tree), Some(node_index)) = (&self.tree, self.selected_node) {
                     let json = json_export::node_to_json_string(tree, node_index);
                     if let Ok(value) = serde_json::from_str::<serde_json::Value>(&json)
-                        && let Ok(formatted) = serde_json::to_string_pretty(&value) {
-                            return clipboard::write(formatted);
-                        }
+                        && let Ok(formatted) = serde_json::to_string_pretty(&value)
+                    {
+                        return clipboard::write(formatted);
+                    }
                     return clipboard::write(json);
                 }
                 Task::none()
@@ -1172,7 +1372,7 @@ impl App {
                                 let _ = fs::write(handle.path(), json_string);
                             }
                         },
-                        |_| Message::NoOp
+                        |_| Message::NoOp,
                     )
                 } else {
                     Task::none()
@@ -1194,7 +1394,7 @@ impl App {
                                 let _ = fs::write(handle.path(), minified);
                             }
                         },
-                        |_| Message::NoOp
+                        |_| Message::NoOp,
                     )
                 } else {
                     Task::none()
@@ -1205,11 +1405,12 @@ impl App {
                 self.context_submenu = ContextSubmenu::None;
                 if let (Some(tree), Some(node_index)) = (&self.tree, self.selected_node) {
                     let json = json_export::node_to_json_string(tree, node_index);
-                    let formatted = if let Ok(value) = serde_json::from_str::<serde_json::Value>(&json) {
-                        serde_json::to_string_pretty(&value).unwrap_or(json)
-                    } else {
-                        json
-                    };
+                    let formatted =
+                        if let Ok(value) = serde_json::from_str::<serde_json::Value>(&json) {
+                            serde_json::to_string_pretty(&value).unwrap_or(json)
+                        } else {
+                            json
+                        };
                     Task::perform(
                         async move {
                             let file_handle = rfd::AsyncFileDialog::new()
@@ -1221,19 +1422,14 @@ impl App {
                                 let _ = fs::write(handle.path(), formatted);
                             }
                         },
-                        |_| Message::NoOp
+                        |_| Message::NoOp,
                     )
                 } else {
                     Task::none()
                 }
             }
             Message::InstallCLI => {
-                Task::perform(
-                    async {
-                        install_cli_tool()
-                    },
-                    Message::InstallCLIResult,
-                )
+                Task::perform(async { install_cli_tool() }, Message::InstallCLIResult)
             }
             Message::InstallCLIResult(result) => {
                 match result {
@@ -1321,17 +1517,34 @@ impl App {
 
     /// Calculate the scroll offset to make a node visible
     fn scroll_to_node(&self, target_index: usize) -> Task<Message> {
-        if let Some(row_pos) = self.flat_rows.iter().position(|r| r.node_index == target_index) {
+        if let Some(row_pos) = self
+            .flat_rows
+            .iter()
+            .position(|r| r.node_index == target_index)
+        {
             let target_offset = row_pos as f32 * ROW_HEIGHT;
             let center_offset = self.viewport_height / 2.0;
             let scroll_y = (target_offset - center_offset).max(0.0);
 
             let id = self.tree_scrollable_id.clone();
-            let offset = AbsoluteOffset { x: Some(0.0), y: Some(scroll_y) };
+            let offset = AbsoluteOffset {
+                x: Some(0.0),
+                y: Some(scroll_y),
+            };
             operate(scroll_to(id, offset))
         } else {
             Task::none()
         }
+    }
+
+    /// Compute the next cascaded window position.
+    fn next_window_position(&self) -> Option<Point> {
+        self.last_window_position.map(|position| {
+            Point::new(
+                position.x + WINDOW_CASCADE_OFFSET,
+                position.y + WINDOW_CASCADE_OFFSET,
+            )
+        })
     }
 
     /// Render the UI
@@ -1389,15 +1602,17 @@ impl App {
             let toolbar = self.render_toolbar(colors);
             let status_bar = self.render_status_bar(colors);
 
-            let tree_container = container(tree_view)
-                .width(Fill)
-                .height(Fill)
-                .style(move |_theme| container::Style {
-                    background: Some(colors.background.into()),
-                    ..Default::default()
-                });
+            let tree_container =
+                container(tree_view)
+                    .width(Fill)
+                    .height(Fill)
+                    .style(move |_theme| container::Style {
+                        background: Some(colors.background.into()),
+                        ..Default::default()
+                    });
 
-            let main_content: Element<'_, Message> = column![toolbar, tree_container, status_bar].into();
+            let main_content: Element<'_, Message> =
+                column![toolbar, tree_container, status_bar].into();
 
             if self.cli_install_result.is_some() {
                 stack![main_content, self.render_cli_install_dialog(colors)].into()
@@ -1425,7 +1640,10 @@ impl App {
     fn render_toolbar<'a>(&self, colors: ThemeColors) -> Element<'a, Message> {
         let case_button = button(text("Aa").size(11))
             .padding([4, 8])
-            .style(button_toggle_style_themed(self.search_case_sensitive, colors))
+            .style(button_toggle_style_themed(
+                self.search_case_sensitive,
+                colors,
+            ))
             .on_press(Message::ToggleCaseSensitive);
 
         let regex_button = button(text(".*").size(11))
@@ -1496,11 +1714,13 @@ impl App {
                 Space::new().width(Length::Fixed(5.0)),
                 next_button,
                 Space::new().width(Length::Fixed(10.0)),
-                text(search_result_text).size(11).color(colors.text_secondary),
+                text(search_result_text)
+                    .size(11)
+                    .color(colors.text_secondary),
                 Space::new().width(Length::Fill),
                 theme_button,
             ]
-            .align_y(Center)
+            .align_y(Center),
         )
         .width(Fill)
         .padding([8, 10])
@@ -1513,11 +1733,14 @@ impl App {
 
     /// Render the status bar
     fn render_status_bar<'a>(&self, colors: ThemeColors) -> Element<'a, Message> {
-        let load_time_str: String = self.load_time
+        let load_time_str: String = self
+            .load_time
             .map(|d| format!("Load: {}ms", d.as_millis()))
             .unwrap_or_default();
 
-        let node_count: String = self.tree.as_ref()
+        let node_count: String = self
+            .tree
+            .as_ref()
             .map(|t| format!("Nodes: {}", t.node_count()))
             .unwrap_or_default();
 
@@ -1547,15 +1770,13 @@ impl App {
             String::new()
         };
 
-        container(
-            row![
-                text(node_count).size(12).color(colors.text_secondary),
-                text("  |  ").size(12).color(colors.text_secondary),
-                text(path_display).size(12).color(colors.key),
-                Space::new().width(Length::Fill),
-                text(load_time_str).size(12).color(colors.text_secondary),
-            ]
-        )
+        container(row![
+            text(node_count).size(12).color(colors.text_secondary),
+            text("  |  ").size(12).color(colors.text_secondary),
+            text(path_display).size(12).color(colors.key),
+            Space::new().width(Length::Fill),
+            text(load_time_str).size(12).color(colors.text_secondary),
+        ])
         .width(Fill)
         .padding([5, 10])
         .style(move |_theme| container::Style {
@@ -1571,11 +1792,9 @@ impl App {
             .size(15)
             .color(colors.text_secondary);
 
-        let open_link = button(
-            text("Open").size(15).style(|_theme| text::Style {
-                color: Some(Color::from_rgb(0.3, 0.5, 0.8)),
-            })
-        )
+        let open_link = button(text("Open").size(15).style(|_theme| text::Style {
+            color: Some(Color::from_rgb(0.3, 0.5, 0.8)),
+        }))
         .on_press(Message::OpenFileDialog)
         .padding(0)
         .style(|_theme, _status| button::Style {
@@ -1586,7 +1805,9 @@ impl App {
 
         let action_row = row![
             open_link,
-            text(" or drag and drop .json file here.").size(15).color(colors.text_secondary),
+            text(" or drag and drop .json file here.")
+                .size(15)
+                .color(colors.text_secondary),
         ];
 
         let new_window_link = button(text("Open in new window").size(13))
@@ -1615,19 +1836,39 @@ impl App {
             .size(13)
             .color(colors.text_secondary);
 
-        let shortcut_style = |colors: ThemeColors| move |_theme: &Theme| text::Style {
-            color: Some(colors.text_secondary),
+        let shortcut_style = |colors: ThemeColors| {
+            move |_theme: &Theme| text::Style {
+                color: Some(colors.text_secondary),
+            }
         };
 
-        let cmd_key = if cfg!(target_os = "macos") { "Cmd" } else { "Ctrl" };
-        let opt_key = if cfg!(target_os = "macos") { "Option" } else { "Alt" };
+        let cmd_key = if cfg!(target_os = "macos") {
+            "Cmd"
+        } else {
+            "Ctrl"
+        };
+        let opt_key = if cfg!(target_os = "macos") {
+            "Option"
+        } else {
+            "Alt"
+        };
 
         let shortcuts_list = column![
-            text(format!("{}+O  Open file", cmd_key)).size(11).style(shortcut_style(colors)),
-            text(format!("{}+C  Copy value", cmd_key)).size(11).style(shortcut_style(colors)),
-            text(format!("{}+Shift+C  Copy key", cmd_key)).size(11).style(shortcut_style(colors)),
-            text(format!("{}+{}+C  Copy path", cmd_key, opt_key)).size(11).style(shortcut_style(colors)),
-            text(format!("{}+/  All shortcuts", cmd_key)).size(11).style(shortcut_style(colors)),
+            text(format!("{}+O  Open file", cmd_key))
+                .size(11)
+                .style(shortcut_style(colors)),
+            text(format!("{}+C  Copy value", cmd_key))
+                .size(11)
+                .style(shortcut_style(colors)),
+            text(format!("{}+Shift+C  Copy key", cmd_key))
+                .size(11)
+                .style(shortcut_style(colors)),
+            text(format!("{}+{}+C  Copy path", cmd_key, opt_key))
+                .size(11)
+                .style(shortcut_style(colors)),
+            text(format!("{}+/  All shortcuts", cmd_key))
+                .size(11)
+                .style(shortcut_style(colors)),
         ]
         .spacing(4)
         .align_x(Center);
@@ -1658,25 +1899,25 @@ impl App {
     }
 
     /// Render the error screen
-    fn render_error_screen<'a>(&self, error: &'a ParseError, colors: ThemeColors) -> Element<'a, Message> {
+    fn render_error_screen<'a>(
+        &self,
+        error: &'a ParseError,
+        colors: ThemeColors,
+    ) -> Element<'a, Message> {
         let error_icon = text("⚠").size(48).color(colors.error);
 
         let error_title = text(format!("Failed to parse {}", error.filename))
             .size(18)
             .color(colors.error);
 
-        let error_message = text(&error.message)
-            .size(14)
-            .color(colors.text_primary);
+        let error_message = text(&error.message).size(14).color(colors.text_primary);
 
         let location_text = match (error.line, error.column) {
             (Some(line), Some(col)) => format!("Line {}, Column {}", line, col),
             (Some(line), None) => format!("Line {}", line),
             _ => String::new(),
         };
-        let location = text(location_text)
-            .size(13)
-            .color(colors.text_secondary);
+        let location = text(location_text).size(13).color(colors.text_secondary);
 
         let context_section: Element<'_, Message> = if let Some(ref ctx_line) = error.context_line {
             let truncated = if ctx_line.len() > 80 {
@@ -1740,14 +1981,35 @@ impl App {
 
     /// Render the help overlay with keyboard shortcuts
     fn render_help_overlay<'a>(&self, colors: ThemeColors) -> Element<'a, Message> {
-        let cmd_key = if cfg!(target_os = "macos") { "⌘" } else { "Ctrl+" };
-        let shift = if cfg!(target_os = "macos") { "⇧" } else { "Shift+" };
-        let opt = if cfg!(target_os = "macos") { "⌥" } else { "Alt+" };
+        let cmd_key = if cfg!(target_os = "macos") {
+            "⌘"
+        } else {
+            "Ctrl+"
+        };
+        let shift = if cfg!(target_os = "macos") {
+            "⇧"
+        } else {
+            "Shift+"
+        };
+        let opt = if cfg!(target_os = "macos") {
+            "⌥"
+        } else {
+            "Alt+"
+        };
 
-        fn shortcut_row<'a>(keys: String, desc: &'static str, colors: ThemeColors) -> Element<'a, Message> {
+        fn shortcut_row<'a>(
+            keys: String,
+            desc: &'static str,
+            colors: ThemeColors,
+        ) -> Element<'a, Message> {
             row![
-                container(text(keys).size(12).font(Font::MONOSPACE).color(colors.text_primary))
-                    .width(Length::Fixed(120.0)),
+                container(
+                    text(keys)
+                        .size(12)
+                        .font(Font::MONOSPACE)
+                        .color(colors.text_primary)
+                )
+                .width(Length::Fixed(120.0)),
                 text(desc).size(12).color(colors.text_secondary),
             ]
             .spacing(10)
@@ -1755,52 +2017,50 @@ impl App {
         }
 
         let shortcuts = column![
-            text("Keyboard Shortcuts").size(16).color(colors.text_primary),
+            text("Keyboard Shortcuts")
+                .size(16)
+                .color(colors.text_primary),
             Space::new().height(Length::Fixed(15.0)),
-
             text("File").size(13).color(colors.key),
             shortcut_row(format!("{}O", cmd_key), "Open file", colors),
             shortcut_row(format!("{}N", cmd_key), "Open in new window", colors),
             Space::new().height(Length::Fixed(10.0)),
-
             text("Edit").size(13).color(colors.key),
             shortcut_row(format!("{}C", cmd_key), "Copy selected value", colors),
             shortcut_row(format!("{}{}C", shift, cmd_key), "Copy key name", colors),
             shortcut_row(format!("{}{}C", opt, cmd_key), "Copy node path", colors),
             Space::new().height(Length::Fixed(10.0)),
-
             text("Search").size(13).color(colors.key),
             shortcut_row(format!("{}F", cmd_key), "Focus search", colors),
             shortcut_row("Enter".to_string(), "Next result", colors),
             shortcut_row(format!("{}Enter", shift), "Previous result", colors),
             shortcut_row("Escape".to_string(), "Clear search", colors),
             Space::new().height(Length::Fixed(10.0)),
-
             text("View").size(13).color(colors.key),
             shortcut_row(format!("{}T", cmd_key), "Toggle theme", colors),
             shortcut_row(format!("{}/", cmd_key), "Toggle this help", colors),
             Space::new().height(Length::Fixed(20.0)),
-
-            text("Press Escape or ⌘/ to close").size(11).color(colors.text_secondary),
+            text("Press Escape or ⌘/ to close")
+                .size(11)
+                .color(colors.text_secondary),
         ]
         .spacing(4)
         .padding(25);
 
-        let overlay_box = container(shortcuts)
-            .style(move |_theme| container::Style {
-                background: Some(colors.toolbar_bg.into()),
-                border: Border {
-                    color: colors.btn_border_top,
-                    width: 1.0,
-                    radius: Radius::from(8.0),
-                },
-                shadow: Shadow {
-                    color: Color::from_rgba(0.0, 0.0, 0.0, 0.5),
-                    offset: iced::Vector::new(0.0, 4.0),
-                    blur_radius: 20.0,
-                },
-                ..Default::default()
-            });
+        let overlay_box = container(shortcuts).style(move |_theme| container::Style {
+            background: Some(colors.toolbar_bg.into()),
+            border: Border {
+                color: colors.btn_border_top,
+                width: 1.0,
+                radius: Radius::from(8.0),
+            },
+            shadow: Shadow {
+                color: Color::from_rgba(0.0, 0.0, 0.0, 0.5),
+                offset: iced::Vector::new(0.0, 4.0),
+                blur_radius: 20.0,
+            },
+            ..Default::default()
+        });
 
         let backdrop = button(Space::new().width(Fill).height(Fill))
             .on_press(Message::ToggleHelp)
@@ -1813,11 +2073,9 @@ impl App {
 
         stack![
             backdrop,
-            container(overlay_box)
-                .width(Fill)
-                .height(Fill)
-                .center(Fill),
-        ].into()
+            container(overlay_box).width(Fill).height(Fill).center(Fill),
+        ]
+        .into()
     }
 
     /// Render the context menu overlay
@@ -1837,125 +2095,138 @@ impl App {
         let submenu_width = 150.0;
 
         let menu_item = |label: &'static str, msg: Message| -> Element<'a, Message> {
-            let item_button = button(
-                text(label).size(13).color(colors.text_primary)
-            )
-            .on_press(msg)
-            .padding([6, 12])
-            .width(Length::Fixed(menu_width - 8.0))
-            .style(move |_theme, status| {
-                let bg = match status {
-                    ButtonStatus::Hovered => Some(colors.selected.into()),
-                    _ => None,
-                };
-                button::Style {
-                    background: bg,
-                    text_color: colors.text_primary,
-                    border: Border {
-                        radius: Radius::from(4.0),
+            let item_button = button(text(label).size(13).color(colors.text_primary))
+                .on_press(msg)
+                .padding([6, 12])
+                .width(Length::Fixed(menu_width - 8.0))
+                .style(move |_theme, status| {
+                    let bg = match status {
+                        ButtonStatus::Hovered => Some(colors.selected.into()),
+                        _ => None,
+                    };
+                    button::Style {
+                        background: bg,
+                        text_color: colors.text_primary,
+                        border: Border {
+                            radius: Radius::from(4.0),
+                            ..Default::default()
+                        },
                         ..Default::default()
-                    },
-                    ..Default::default()
-                }
-            });
+                    }
+                });
 
             mouse_area(item_button)
                 .on_enter(Message::OpenSubmenu(ContextSubmenu::None))
                 .into()
         };
 
-        let submenu_parent = |label: &'static str, submenu: ContextSubmenu, is_open: bool| -> Element<'a, Message> {
-            let bg_color = if is_open { colors.selected } else { Color::TRANSPARENT };
-            let item_content = container(
-                row![
+        let submenu_parent =
+            |label: &'static str, submenu: ContextSubmenu, is_open: bool| -> Element<'a, Message> {
+                let bg_color = if is_open {
+                    colors.selected
+                } else {
+                    Color::TRANSPARENT
+                };
+                let item_content = container(row![
                     text(label).size(13).color(colors.text_primary),
                     Space::new().width(Length::Fill),
                     text("›").size(14).color(colors.text_secondary),
-                ]
-            )
-            .padding([6, 12])
-            .width(Length::Fixed(menu_width - 8.0))
-            .style(move |_theme| container::Style {
-                background: Some(bg_color.into()),
-                border: Border {
-                    radius: Radius::from(4.0),
-                    ..Default::default()
-                },
-                ..Default::default()
-            });
-
-            mouse_area(item_content)
-                .on_enter(Message::OpenSubmenu(submenu))
-                .into()
-        };
-
-        let submenu_item = |label: &'static str, msg: Message| -> Element<'a, Message> {
-            button(
-                text(label).size(13).color(colors.text_primary)
-            )
-            .on_press(msg)
-            .padding([6, 12])
-            .width(Length::Fixed(submenu_width - 8.0))
-            .style(move |_theme, status| {
-                let bg = match status {
-                    ButtonStatus::Hovered => Some(colors.selected.into()),
-                    _ => None,
-                };
-                button::Style {
-                    background: bg,
-                    text_color: colors.text_primary,
+                ])
+                .padding([6, 12])
+                .width(Length::Fixed(menu_width - 8.0))
+                .style(move |_theme| container::Style {
+                    background: Some(bg_color.into()),
                     border: Border {
                         radius: Radius::from(4.0),
                         ..Default::default()
                     },
                     ..Default::default()
-                }
-            })
-            .into()
+                });
+
+                mouse_area(item_content)
+                    .on_enter(Message::OpenSubmenu(submenu))
+                    .into()
+            };
+
+        let submenu_item = |label: &'static str, msg: Message| -> Element<'a, Message> {
+            button(text(label).size(13).color(colors.text_primary))
+                .on_press(msg)
+                .padding([6, 12])
+                .width(Length::Fixed(submenu_width - 8.0))
+                .style(move |_theme, status| {
+                    let bg = match status {
+                        ButtonStatus::Hovered => Some(colors.selected.into()),
+                        _ => None,
+                    };
+                    button::Style {
+                        background: bg,
+                        text_color: colors.text_primary,
+                        border: Border {
+                            radius: Radius::from(4.0),
+                            ..Default::default()
+                        },
+                        ..Default::default()
+                    }
+                })
+                .into()
         };
 
         let separator = || -> Element<'a, Message> {
-            container(Space::new().width(Length::Fixed(menu_width - 16.0)).height(Length::Fixed(1.0)))
-                .padding([4, 4])
-                .style(move |_theme| container::Style {
-                    background: Some(colors.btn_border_bottom.into()),
-                    ..Default::default()
-                })
-                .into()
+            container(
+                Space::new()
+                    .width(Length::Fixed(menu_width - 16.0))
+                    .height(Length::Fixed(1.0)),
+            )
+            .padding([4, 4])
+            .style(move |_theme| container::Style {
+                background: Some(colors.btn_border_bottom.into()),
+                ..Default::default()
+            })
+            .into()
         };
 
         let mut menu_items: Vec<Element<'a, Message>> = vec![
             menu_item("Copy Key", Message::CopySelectedName),
             menu_item("Copy Value", Message::CopySelectedValue),
-            submenu_parent("Copy Value As", ContextSubmenu::CopyValueAs, current_submenu == ContextSubmenu::CopyValueAs),
+            submenu_parent(
+                "Copy Value As",
+                ContextSubmenu::CopyValueAs,
+                current_submenu == ContextSubmenu::CopyValueAs,
+            ),
             menu_item("Copy Path", Message::CopySelectedPath),
             separator(),
-            submenu_parent("Export Value As", ContextSubmenu::ExportValueAs, current_submenu == ContextSubmenu::ExportValueAs),
+            submenu_parent(
+                "Export Value As",
+                ContextSubmenu::ExportValueAs,
+                current_submenu == ContextSubmenu::ExportValueAs,
+            ),
         ];
 
         if has_children {
             menu_items.push(separator());
             menu_items.push(menu_item("Expand All Children", Message::ExpandAllChildren));
-            menu_items.push(menu_item("Collapse All Children", Message::CollapseAllChildren));
+            menu_items.push(menu_item(
+                "Collapse All Children",
+                Message::CollapseAllChildren,
+            ));
         }
 
         let menu_content = column(menu_items).spacing(0).padding(4);
 
-        let menu_box = container(menu_content)
-            .style(move |_theme| container::Style {
-                background: Some(colors.toolbar_bg.into()),
-                border: Border {
-                    color: colors.btn_border_top,
-                    width: 1.0,
-                    radius: Radius::from(6.0),
-                },
-                shadow: Shadow {
-                    color: Color::from_rgba(0.0, 0.0, 0.0, 0.4),
-                    offset: iced::Vector::new(0.0, 2.0),
-                    blur_radius: 10.0,
-                },
-                ..Default::default()
-            });
+        let menu_box = container(menu_content).style(move |_theme| container::Style {
+            background: Some(colors.toolbar_bg.into()),
+            border: Border {
+                color: colors.btn_border_top,
+                width: 1.0,
+                radius: Radius::from(6.0),
+            },
+            shadow: Shadow {
+                color: Color::from_rgba(0.0, 0.0, 0.0, 0.4),
+                offset: iced::Vector::new(0.0, 2.0),
+                blur_radius: 10.0,
+            },
+            ..Default::default()
+        });
 
         let submenu_box: Option<Element<'a, Message>> = match current_submenu {
             ContextSubmenu::CopyValueAs => {
@@ -1966,22 +2237,24 @@ impl App {
                 .spacing(0)
                 .padding(4);
 
-                Some(container(submenu_content)
-                    .style(move |_theme| container::Style {
-                        background: Some(colors.toolbar_bg.into()),
-                        border: Border {
-                            color: colors.btn_border_top,
-                            width: 1.0,
-                            radius: Radius::from(6.0),
-                        },
-                        shadow: Shadow {
-                            color: Color::from_rgba(0.0, 0.0, 0.0, 0.4),
-                            offset: iced::Vector::new(0.0, 2.0),
-                            blur_radius: 10.0,
-                        },
-                        ..Default::default()
-                    })
-                    .into())
+                Some(
+                    container(submenu_content)
+                        .style(move |_theme| container::Style {
+                            background: Some(colors.toolbar_bg.into()),
+                            border: Border {
+                                color: colors.btn_border_top,
+                                width: 1.0,
+                                radius: Radius::from(6.0),
+                            },
+                            shadow: Shadow {
+                                color: Color::from_rgba(0.0, 0.0, 0.0, 0.4),
+                                offset: iced::Vector::new(0.0, 2.0),
+                                blur_radius: 10.0,
+                            },
+                            ..Default::default()
+                        })
+                        .into(),
+                )
             }
             ContextSubmenu::ExportValueAs => {
                 let submenu_content = column![
@@ -1992,28 +2265,30 @@ impl App {
                 .spacing(0)
                 .padding(4);
 
-                Some(container(submenu_content)
-                    .style(move |_theme| container::Style {
-                        background: Some(colors.toolbar_bg.into()),
-                        border: Border {
-                            color: colors.btn_border_top,
-                            width: 1.0,
-                            radius: Radius::from(6.0),
-                        },
-                        shadow: Shadow {
-                            color: Color::from_rgba(0.0, 0.0, 0.0, 0.4),
-                            offset: iced::Vector::new(0.0, 2.0),
-                            blur_radius: 10.0,
-                        },
-                        ..Default::default()
-                    })
-                    .into())
+                Some(
+                    container(submenu_content)
+                        .style(move |_theme| container::Style {
+                            background: Some(colors.toolbar_bg.into()),
+                            border: Border {
+                                color: colors.btn_border_top,
+                                width: 1.0,
+                                radius: Radius::from(6.0),
+                            },
+                            shadow: Shadow {
+                                color: Color::from_rgba(0.0, 0.0, 0.0, 0.4),
+                                offset: iced::Vector::new(0.0, 2.0),
+                                blur_radius: 10.0,
+                            },
+                            ..Default::default()
+                        })
+                        .into(),
+                )
             }
             ContextSubmenu::None => None,
         };
 
-        let backdrop = mouse_area(Space::new().width(Fill).height(Fill))
-            .on_press(Message::HideContextMenu);
+        let backdrop =
+            mouse_area(Space::new().width(Fill).height(Fill)).on_press(Message::HideContextMenu);
 
         let clamped_x = menu_x.max(10.0);
         let clamped_y = menu_y.max(10.0);
@@ -2033,41 +2308,41 @@ impl App {
                     Space::new().height(Length::Fixed(submenu_y_offset)),
                     submenu,
                 ]
-            ].into()
+            ]
+            .into()
         } else {
-            row![
-                Space::new().width(Length::Fixed(clamped_x)),
-                menu_box,
-            ].into()
+            row![Space::new().width(Length::Fixed(clamped_x)), menu_box,].into()
         };
 
         stack![
             backdrop,
-            column![
-                Space::new().height(Length::Fixed(clamped_y)),
-                menu_row,
-            ]
-        ].into()
+            column![Space::new().height(Length::Fixed(clamped_y)), menu_row,]
+        ]
+        .into()
     }
 
     /// Render the update check dialog overlay
     fn render_update_dialog(&self, colors: ThemeColors) -> Element<'_, Message> {
         let content: Element<'_, Message> = match &self.update_check_state {
-            UpdateCheckState::Checking => {
-                column![
-                    text("Checking for Updates").size(16).color(colors.text_primary),
-                    Space::new().height(Length::Fixed(15.0)),
-                    text("Contacting GitHub...").size(13).color(colors.text_secondary),
-                    Space::new().height(Length::Fixed(20.0)),
-                ]
-                .spacing(4)
-                .padding(25)
-                .into()
-            }
+            UpdateCheckState::Checking => column![
+                text("Checking for Updates")
+                    .size(16)
+                    .color(colors.text_primary),
+                Space::new().height(Length::Fixed(15.0)),
+                text("Contacting GitHub...")
+                    .size(13)
+                    .color(colors.text_secondary),
+                Space::new().height(Length::Fixed(20.0)),
+            ]
+            .spacing(4)
+            .padding(25)
+            .into(),
             UpdateCheckState::UpToDate => {
                 let current_version = env!("CARGO_PKG_VERSION");
                 column![
-                    text("You're Up to Date").size(16).color(colors.text_primary),
+                    text("You're Up to Date")
+                        .size(16)
+                        .color(colors.text_primary),
                     Space::new().height(Length::Fixed(15.0)),
                     text(format!("Unfold {} is the latest version.", current_version))
                         .size(13)
@@ -2097,7 +2372,10 @@ impl App {
                 .align_x(iced::Alignment::Center)
                 .into()
             }
-            UpdateCheckState::UpdateAvailable { version, release_url } => {
+            UpdateCheckState::UpdateAvailable {
+                version,
+                release_url,
+            } => {
                 let url = release_url.clone();
                 column![
                     text("Update Available").size(16).color(colors.text_primary),
@@ -2152,63 +2430,60 @@ impl App {
                 .align_x(iced::Alignment::Center)
                 .into()
             }
-            UpdateCheckState::Error(msg) => {
-                column![
-                    text("Update Check Failed").size(16).color(colors.text_primary),
-                    Space::new().height(Length::Fixed(15.0)),
-                    text(msg).size(13).color(Color::from_rgb(0.9, 0.3, 0.3)),
-                    Space::new().height(Length::Fixed(20.0)),
-                    button(text("OK").size(13).color(colors.text_primary))
-                        .on_press(Message::DismissUpdateDialog)
-                        .padding([8, 20])
-                        .style(move |_theme, status| {
-                            let bg = match status {
-                                ButtonStatus::Hovered => colors.selected,
-                                _ => colors.btn_border_top,
-                            };
-                            button::Style {
-                                background: Some(bg.into()),
-                                text_color: colors.text_primary,
-                                border: Border {
-                                    radius: Radius::from(6.0),
-                                    ..Default::default()
-                                },
+            UpdateCheckState::Error(msg) => column![
+                text("Update Check Failed")
+                    .size(16)
+                    .color(colors.text_primary),
+                Space::new().height(Length::Fixed(15.0)),
+                text(msg).size(13).color(Color::from_rgb(0.9, 0.3, 0.3)),
+                Space::new().height(Length::Fixed(20.0)),
+                button(text("OK").size(13).color(colors.text_primary))
+                    .on_press(Message::DismissUpdateDialog)
+                    .padding([8, 20])
+                    .style(move |_theme, status| {
+                        let bg = match status {
+                            ButtonStatus::Hovered => colors.selected,
+                            _ => colors.btn_border_top,
+                        };
+                        button::Style {
+                            background: Some(bg.into()),
+                            text_color: colors.text_primary,
+                            border: Border {
+                                radius: Radius::from(6.0),
                                 ..Default::default()
-                            }
-                        }),
-                ]
-                .spacing(4)
-                .padding(25)
-                .align_x(iced::Alignment::Center)
-                .into()
-            }
+                            },
+                            ..Default::default()
+                        }
+                    }),
+            ]
+            .spacing(4)
+            .padding(25)
+            .align_x(iced::Alignment::Center)
+            .into(),
             UpdateCheckState::None => Space::new().into(),
         };
 
-        let overlay_box = container(content)
-            .style(move |_theme| container::Style {
-                background: Some(colors.toolbar_bg.into()),
-                border: Border {
-                    color: colors.btn_border_top,
-                    width: 1.0,
-                    radius: Radius::from(8.0),
-                },
-                shadow: Shadow {
-                    color: Color::from_rgba(0.0, 0.0, 0.0, 0.5),
-                    offset: iced::Vector::new(0.0, 4.0),
-                    blur_radius: 20.0,
-                },
-                ..Default::default()
-            });
+        let overlay_box = container(content).style(move |_theme| container::Style {
+            background: Some(colors.toolbar_bg.into()),
+            border: Border {
+                color: colors.btn_border_top,
+                width: 1.0,
+                radius: Radius::from(8.0),
+            },
+            shadow: Shadow {
+                color: Color::from_rgba(0.0, 0.0, 0.0, 0.5),
+                offset: iced::Vector::new(0.0, 4.0),
+                blur_radius: 20.0,
+            },
+            ..Default::default()
+        });
 
         let backdrop = button(Space::new().width(Fill).height(Fill))
-            .on_press_maybe(
-                if self.update_check_state == UpdateCheckState::Checking {
-                    None
-                } else {
-                    Some(Message::DismissUpdateDialog)
-                }
-            )
+            .on_press_maybe(if self.update_check_state == UpdateCheckState::Checking {
+                None
+            } else {
+                Some(Message::DismissUpdateDialog)
+            })
             .style(|_theme, _status| button::Style {
                 background: Some(Color::from_rgba(0.0, 0.0, 0.0, 0.5).into()),
                 ..Default::default()
@@ -2218,11 +2493,9 @@ impl App {
 
         stack![
             backdrop,
-            container(overlay_box)
-                .width(Fill)
-                .height(Fill)
-                .center(Fill),
-        ].into()
+            container(overlay_box).width(Fill).height(Fill).center(Fill),
+        ]
+        .into()
     }
 
     /// Render the CLI installation result dialog overlay
@@ -2270,21 +2543,20 @@ impl App {
         .align_x(iced::Alignment::Center)
         .into();
 
-        let overlay_box = container(content)
-            .style(move |_theme| container::Style {
-                background: Some(colors.toolbar_bg.into()),
-                border: Border {
-                    color: colors.btn_border_top,
-                    width: 1.0,
-                    radius: Radius::from(8.0),
-                },
-                shadow: Shadow {
-                    color: Color::from_rgba(0.0, 0.0, 0.0, 0.5),
-                    offset: iced::Vector::new(0.0, 4.0),
-                    blur_radius: 20.0,
-                },
-                ..Default::default()
-            });
+        let overlay_box = container(content).style(move |_theme| container::Style {
+            background: Some(colors.toolbar_bg.into()),
+            border: Border {
+                color: colors.btn_border_top,
+                width: 1.0,
+                radius: Radius::from(8.0),
+            },
+            shadow: Shadow {
+                color: Color::from_rgba(0.0, 0.0, 0.0, 0.5),
+                offset: iced::Vector::new(0.0, 4.0),
+                blur_radius: 20.0,
+            },
+            ..Default::default()
+        });
 
         let backdrop = button(Space::new().width(Fill).height(Fill))
             .on_press(Message::DismissCLIDialog)
@@ -2297,11 +2569,9 @@ impl App {
 
         stack![
             backdrop,
-            container(overlay_box)
-                .width(Fill)
-                .height(Fill)
-                .center(Fill),
-        ].into()
+            container(overlay_box).width(Fill).height(Fill).center(Fill),
+        ]
+        .into()
     }
 }
 
@@ -2375,18 +2645,63 @@ mod tests {
         assert_eq!(first, Some(PathBuf::from("/tmp/first.json")));
         assert_eq!(
             remaining,
-            vec![PathBuf::from("/tmp/second.json"), PathBuf::from("/tmp/third.json")]
+            vec![
+                PathBuf::from("/tmp/second.json"),
+                PathBuf::from("/tmp/third.json")
+            ]
         );
     }
 
     #[test]
-    fn test_cli_file_argument_uses_first_positional_arg() {
+    fn test_parse_launch_options_uses_first_positional_arg() {
         let args = vec![
             "unfold".to_string(),
             "/tmp/package.json".to_string(),
             "/tmp/ignored.json".to_string(),
         ];
 
-        assert_eq!(cli_file_argument(&args), Some(PathBuf::from("/tmp/package.json")));
+        let options = parse_launch_options(&args);
+        assert_eq!(options.file_path, Some(PathBuf::from("/tmp/package.json")));
+    }
+
+    #[test]
+    fn test_parse_launch_options_with_window_position_and_handoff() {
+        let args = vec![
+            "unfold".to_string(),
+            ARG_WINDOW_X.to_string(),
+            "120".to_string(),
+            ARG_WINDOW_Y.to_string(),
+            "340".to_string(),
+            ARG_SPAWN_HANDOFF.to_string(),
+            "/tmp/data.json".to_string(),
+        ];
+
+        let options = parse_launch_options(&args);
+        assert_eq!(options.file_path, Some(PathBuf::from("/tmp/data.json")));
+        assert!(options.spawn_handoff);
+
+        let position = options.window_position().expect("position should parse");
+        assert_eq!(position.x, 120.0);
+        assert_eq!(position.y, 340.0);
+    }
+
+    #[test]
+    fn test_dedupe_paths_preserves_order() {
+        let paths = vec![
+            PathBuf::from("/tmp/a.json"),
+            PathBuf::from("/tmp/b.json"),
+            PathBuf::from("/tmp/a.json"),
+            PathBuf::from("/tmp/c.json"),
+        ];
+
+        let deduped = dedupe_paths(paths);
+        assert_eq!(
+            deduped,
+            vec![
+                PathBuf::from("/tmp/a.json"),
+                PathBuf::from("/tmp/b.json"),
+                PathBuf::from("/tmp/c.json"),
+            ]
+        );
     }
 }

@@ -524,6 +524,43 @@ This document captures the key design decisions made for the JSON viewer project
 
 ## Success Criteria (Repeated for Emphasis)
 
+## Recent Decisions (Window + Input)
+
+### 11. Multi-window launch handoff and positioning
+
+**Decision**: Spawn child windows with explicit launch options and a fixed cascade offset.
+
+**Rationale**:
+- Avoid recursive spawn loops when macOS open-file callbacks fire in child processes.
+- Keep `Cmd/Ctrl+N` behavior consistent across macOS and Windows.
+- Make child window placement deterministic without introducing extra dependencies.
+
+**Trade-offs**:
+- **Pro**: Prevents open-file process storms in handoff children.
+- **Pro**: Predictable `+32,+32` cascaded placement for new windows.
+- **Con**: Position is process-local; no cross-process "last window" memory yet.
+- **Con**: No monitor-bounds clamping yet.
+
+**Implementation**:
+- Launch options: `--window-x`, `--window-y`, `--spawn-handoff`
+- Window position tracked from `window::Event::Opened` and `window::Event::Moved`
+- macOS open-file handler can disable spawn-on-open for handoff children
+
+### 12. Keyboard event routing with capture status
+
+**Decision**: Route keyboard handling via `event::listen_with` and only run app-level shortcuts on ignored events.
+
+**Rationale**:
+- Prevent app shortcuts from interfering with focused input widgets.
+- Make paste and text input behavior more reliable.
+
+**Trade-offs**:
+- **Pro**: Clear separation between widget-owned input and global shortcuts.
+- **Pro**: Fewer accidental shortcut conflicts.
+- **Con**: Slightly more complex event matching in the subscription layer.
+
+---
+
 ### Minimum Success (Must Have)
 - [ ] Opens and displays 100MB JSON file
 - [ ] Smooth scrolling through tree
@@ -547,6 +584,6 @@ This document captures the key design decisions made for the JSON viewer project
 
 ---
 
-**Document Version**: 0.1.0  
-**Last Updated**: 2025-12-12  
+**Document Version**: 0.1.1  
+**Last Updated**: 2026-05-23  
 **Status**: Draft

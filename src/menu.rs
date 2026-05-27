@@ -2,12 +2,12 @@
 //!
 //! Provides cross-platform native menus for macOS, Windows, and Linux.
 
-use muda::{
-    Menu, Submenu, MenuItem, PredefinedMenuItem, MenuEvent,
-    accelerator::{Accelerator, Modifiers as MudaModifiers, Code},
-};
 #[cfg(target_os = "macos")]
 use muda::AboutMetadata;
+use muda::{
+    Menu, MenuEvent, MenuItem, PredefinedMenuItem, Submenu,
+    accelerator::{Accelerator, Code, Modifiers as MudaModifiers},
+};
 
 use crate::config::Config;
 use crate::message::Message;
@@ -52,12 +52,15 @@ pub fn create_app_menu() -> Menu {
     {
         let app_menu = Submenu::new("Unfold", true);
         let _ = app_menu.append_items(&[
-            &PredefinedMenuItem::about(None, Some(AboutMetadata {
-                name: Some("Unfold".into()),
-                version: Some(env!("CARGO_PKG_VERSION").into()),
-                copyright: Some("Copyright 2025 Mauricio Mercado".into()),
-                ..Default::default()
-            })),
+            &PredefinedMenuItem::about(
+                None,
+                Some(AboutMetadata {
+                    name: Some("Unfold".into()),
+                    version: Some(env!("CARGO_PKG_VERSION").into()),
+                    copyright: Some("Copyright 2025 Mauricio Mercado".into()),
+                    ..Default::default()
+                }),
+            ),
             &PredefinedMenuItem::separator(),
             &MenuItem::with_id(
                 menu_ids::CHECK_UPDATES,
@@ -103,7 +106,10 @@ pub fn create_app_menu() -> Menu {
             menu_ids::OPEN_EXTERNAL,
             "Open in External Editor",
             true,
-            Some(Accelerator::new(Some(MudaModifiers::SUPER | MudaModifiers::SHIFT), Code::KeyE)),
+            Some(Accelerator::new(
+                Some(MudaModifiers::SUPER | MudaModifiers::SHIFT),
+                Code::KeyE,
+            )),
         ),
         &PredefinedMenuItem::separator(),
         &PredefinedMenuItem::close_window(None),
@@ -227,10 +233,25 @@ pub fn create_context_menu() -> Menu {
             )),
         ),
         &PredefinedMenuItem::separator(),
-        &MenuItem::with_id(menu_ids::EXPORT_JSON, "Export JSON...", true, None::<Accelerator>),
+        &MenuItem::with_id(
+            menu_ids::EXPORT_JSON,
+            "Export JSON...",
+            true,
+            None::<Accelerator>,
+        ),
         &PredefinedMenuItem::separator(),
-        &MenuItem::with_id(menu_ids::EXPAND_ALL, "Expand All Children", true, None::<Accelerator>),
-        &MenuItem::with_id(menu_ids::COLLAPSE_ALL, "Collapse All Children", true, None::<Accelerator>),
+        &MenuItem::with_id(
+            menu_ids::EXPAND_ALL,
+            "Expand All Children",
+            true,
+            None::<Accelerator>,
+        ),
+        &MenuItem::with_id(
+            menu_ids::COLLAPSE_ALL,
+            "Collapse All Children",
+            true,
+            None::<Accelerator>,
+        ),
     ]);
     menu
 }
@@ -269,7 +290,7 @@ pub fn try_initialize_menu() -> bool {
 pub fn menu_event_to_message(event: &muda::MenuEvent) -> Message {
     match event.id().as_ref() {
         id if id == menu_ids::OPEN_FILE => Message::OpenFileDialog,
-        id if id == menu_ids::OPEN_NEW_WINDOW => Message::OpenFileInNewWindow,
+        id if id == menu_ids::OPEN_NEW_WINDOW => Message::OpenEmptyWindow,
         id if id == menu_ids::COPY_VALUE => Message::CopySelectedValue,
         id if id == menu_ids::COPY_KEY => Message::CopySelectedName,
         id if id == menu_ids::COPY_PATH => Message::CopySelectedPath,
@@ -287,7 +308,10 @@ pub fn menu_event_to_message(event: &muda::MenuEvent) -> Message {
 
 /// Try to receive a menu event (non-blocking)
 pub fn try_receive_menu_event() -> Option<Message> {
-    MenuEvent::receiver().try_recv().ok().map(|event| menu_event_to_message(&event))
+    MenuEvent::receiver()
+        .try_recv()
+        .ok()
+        .map(|event| menu_event_to_message(&event))
 }
 
 #[cfg(test)]

@@ -2,6 +2,8 @@
 //!
 //! Each variant represents an event that can update the application state.
 
+use iced::Point;
+use iced::event::Status as EventStatus;
 use iced::keyboard::{Key, Modifiers};
 use iced::widget::scrollable::Viewport;
 use std::path::PathBuf;
@@ -23,8 +25,8 @@ pub enum Message {
     SearchPrev,
     ToggleCaseSensitive,
     ToggleRegex,
-    /// Keyboard events - Key and Modifiers tell us what was pressed
-    KeyPressed(Key, Modifiers),
+    /// Keyboard events - Key, Modifiers, and whether widget captured it
+    KeyPressed(Key, Modifiers, EventStatus),
     ModifiersChanged(Modifiers),
     ClearSearch,
     FocusSearch,
@@ -32,8 +34,12 @@ pub enum Message {
     SearchSubmit,
     /// Open file dialog, then open selected file in new window
     OpenFileInNewWindow,
+    /// Open an empty window (Cmd/Ctrl+N)
+    OpenEmptyWindow,
     /// File was selected for opening in new window
     FileSelectedForNewWindow(Option<PathBuf>),
+    /// Window position changed/opened
+    WindowPositionUpdated(Point),
     /// Select a node (for copy, path display)
     SelectNode(usize),
     /// Copy selected node's value to clipboard
@@ -83,6 +89,10 @@ pub enum Message {
     InstallCLIResult(Result<String, String>),
     /// Dismiss CLI install dialog
     DismissCLIDialog,
+    /// Paste clipboard text into search query
+    PasteSearchFromClipboard,
+    /// Clipboard text was read for search paste
+    SearchClipboardPasted(Option<String>),
 }
 
 /// Which submenu is currently open in context menu
