@@ -2,6 +2,14 @@
 
 All notable changes to Unfold will be documented in this file.
 
+## [1.5.7](https://github.com/maumercado/unfold/compare/v1.5.6...v1.5.7) (2026-05-27)
+
+
+### Bug Fixes
+
+* restore search paste on macOS ([#19](https://github.com/maumercado/unfold/issues/19)) ([77d898c](https://github.com/maumercado/unfold/commit/77d898cf4adcf1ed43087809dc2eb252df4518a3))
+* stabilize file open and window spawning ([44e81a9](https://github.com/maumercado/unfold/commit/44e81a9d40c2675d20187102837cae73cc0b8df1))
+
 ## [1.5.6](https://github.com/maumercado/unfold/compare/v1.5.5...v1.5.6) (2026-04-16)
 
 
