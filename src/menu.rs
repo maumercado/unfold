@@ -119,9 +119,6 @@ pub fn create_app_menu() -> Menu {
     // ===== Edit Menu =====
     let edit_menu = Submenu::new("Edit", true);
     let _ = edit_menu.append_items(&[
-        &PredefinedMenuItem::copy(None),
-        &PredefinedMenuItem::paste(None),
-        &PredefinedMenuItem::separator(),
         &MenuItem::with_id(
             menu_ids::COPY_VALUE,
             "Copy Value",

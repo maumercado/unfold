@@ -28,6 +28,7 @@ pub enum Message {
     /// Keyboard events - Key, Modifiers, and whether widget captured it
     KeyPressed(Key, Modifiers, EventStatus),
     ModifiersChanged(Modifiers),
+    CursorMoved(Point),
     ClearSearch,
     FocusSearch,
     /// Search submit from text input (checks current_modifiers for Shift)
@@ -70,8 +71,8 @@ pub enum Message {
     CollapseAllChildren,
     /// Open current file in external editor
     OpenInExternalEditor,
-    /// Show context menu at position (node_index, x, y)
-    ShowContextMenu(usize, f32, f32),
+    /// Show context menu for node at current cursor position
+    ShowContextMenu(usize),
     /// Hide context menu
     HideContextMenu,
     /// Open submenu

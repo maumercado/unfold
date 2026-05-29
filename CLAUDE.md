@@ -214,6 +214,13 @@ See `docs/DESIGN_DECISIONS.md` for detailed rationale on:
 
 - Keyboard handling now routes through `event::listen_with` with event status.
 - App-level shortcuts only run for ignored events to avoid conflicting with focused widget input behavior.
+- App-level shortcuts use `Modifiers::command()` as the platform-primary modifier (`Cmd` on macOS, `Ctrl` elsewhere); do not OR in raw `control()` on macOS.
+- Native predefined Copy/Paste menu items are avoided because they can intercept macOS accelerators before Iced text inputs receive them.
+
+### Context Menu Targeting
+
+- Right-click context menus track the latest cursor position from mouse move events instead of estimating coordinates from virtual row index and scroll offset.
+- Context-menu actions prefer the node stored in `context_menu_state`; keyboard shortcuts continue using `selected_node`.
 
 ## Performance Considerations
 
