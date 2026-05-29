@@ -5,8 +5,8 @@ pub enum JsonValue {
     Bool(bool),
     Number(f64),
     String(String),
-    Array,   // Children stored in JsonNode.children
-    Object,  // Children stored in JsonNode.children
+    Array,  // Children stored in JsonNode.children
+    Object, // Children stored in JsonNode.children
 }
 
 /// Represents a single node in our JSON tree

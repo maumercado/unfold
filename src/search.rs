@@ -304,7 +304,10 @@ mod tests {
 
         // "TRAN" (all caps, case-sensitive) → no match anywhere
         let (results, _) = search_nodes(&tree, "TRAN", true, false);
-        assert!(results.is_empty(), "Case-sensitive 'TRAN' should find nothing");
+        assert!(
+            results.is_empty(),
+            "Case-sensitive 'TRAN' should find nothing"
+        );
     }
 
     /// Regex search works against both keys and values.
@@ -352,44 +355,56 @@ mod tests {
     #[test]
     fn test_highlight_segments_match_at_start() {
         let segs = highlight_segments("transfer credit", "trans", false, false);
-        assert_eq!(segs, vec![
-            ("trans".to_string(), true),
-            ("fer credit".to_string(), false),
-        ]);
+        assert_eq!(
+            segs,
+            vec![
+                ("trans".to_string(), true),
+                ("fer credit".to_string(), false),
+            ]
+        );
     }
 
     /// Match at the very end of the string.
     #[test]
     fn test_highlight_segments_match_at_end() {
         let segs = highlight_segments("credit transfer", "transfer", false, false);
-        assert_eq!(segs, vec![
-            ("credit ".to_string(), false),
-            ("transfer".to_string(), true),
-        ]);
+        assert_eq!(
+            segs,
+            vec![
+                ("credit ".to_string(), false),
+                ("transfer".to_string(), true),
+            ]
+        );
     }
 
     /// Match in the middle of the string.
     #[test]
     fn test_highlight_segments_match_in_middle() {
         let segs = highlight_segments("crsTransferStatus", "tran", false, false);
-        assert_eq!(segs, vec![
-            ("crs".to_string(), false),
-            ("Tran".to_string(), true),   // original casing preserved
-            ("sferStatus".to_string(), false),
-        ]);
+        assert_eq!(
+            segs,
+            vec![
+                ("crs".to_string(), false),
+                ("Tran".to_string(), true), // original casing preserved
+                ("sferStatus".to_string(), false),
+            ]
+        );
     }
 
     /// Multiple non-overlapping matches in one string.
     #[test]
     fn test_highlight_segments_multiple_matches() {
         let segs = highlight_segments("tran and TRAN and tran", "tran", false, false);
-        assert_eq!(segs, vec![
-            ("tran".to_string(), true),
-            (" and ".to_string(), false),
-            ("TRAN".to_string(), true),
-            (" and ".to_string(), false),
-            ("tran".to_string(), true),
-        ]);
+        assert_eq!(
+            segs,
+            vec![
+                ("tran".to_string(), true),
+                (" and ".to_string(), false),
+                ("TRAN".to_string(), true),
+                (" and ".to_string(), false),
+                ("tran".to_string(), true),
+            ]
+        );
     }
 
     /// Case-sensitive mode: only exact case matches.
@@ -401,32 +416,41 @@ mod tests {
 
         // "Tran" should match exactly
         let segs = highlight_segments("crsTransferStatus", "Tran", true, false);
-        assert_eq!(segs, vec![
-            ("crs".to_string(), false),
-            ("Tran".to_string(), true),
-            ("sferStatus".to_string(), false),
-        ]);
+        assert_eq!(
+            segs,
+            vec![
+                ("crs".to_string(), false),
+                ("Tran".to_string(), true),
+                ("sferStatus".to_string(), false),
+            ]
+        );
     }
 
     /// Original casing is always preserved in output, even for case-insensitive matches.
     #[test]
     fn test_highlight_segments_preserves_original_casing() {
         let segs = highlight_segments("John TRAN", "tran", false, false);
-        assert_eq!(segs, vec![
-            ("John ".to_string(), false),
-            ("TRAN".to_string(), true),  // "TRAN" preserved, not lowercased to "tran"
-        ]);
+        assert_eq!(
+            segs,
+            vec![
+                ("John ".to_string(), false),
+                ("TRAN".to_string(), true), // "TRAN" preserved, not lowercased to "tran"
+            ]
+        );
     }
 
     /// Regex mode matches and segments correctly.
     #[test]
     fn test_highlight_segments_regex() {
         let segs = highlight_segments("transition and transfer", r"trans(ition|fer)", false, true);
-        assert_eq!(segs, vec![
-            ("transition".to_string(), true),
-            (" and ".to_string(), false),
-            ("transfer".to_string(), true),
-        ]);
+        assert_eq!(
+            segs,
+            vec![
+                ("transition".to_string(), true),
+                (" and ".to_string(), false),
+                ("transfer".to_string(), true),
+            ]
+        );
     }
 
     /// Invalid regex → single non-highlighted segment (graceful fallback).
