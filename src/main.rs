@@ -28,7 +28,7 @@ use iced::widget::{
 };
 use iced::{
     Border, Center, Color, Element, Event, Fill, Font, Length, Point, Shadow, Size, Subscription,
-    Task, Theme, clipboard, event, window,
+    Task, Theme, clipboard, event, mouse, window,
 };
 use std::collections::HashSet;
 use std::env;
@@ -356,6 +356,8 @@ struct App {
     current_modifiers: Modifiers,
     /// Last known window position (used for cascading new windows)
     last_window_position: Option<Point>,
+    /// Last known cursor position (used for context menu placement)
+    last_cursor_position: Point,
     /// Currently selected node (for copy, path display, etc.)
     selected_node: Option<usize>,
     /// Parse error details (for better error display)
@@ -427,6 +429,7 @@ impl App {
             search_input_id: WidgetId::unique(),
             current_modifiers: Modifiers::default(),
             last_window_position: launch_options.window_position(),
+            last_cursor_position: Point::ORIGIN,
             selected_node: None,
             parse_error: None,
             show_help: false,
@@ -474,6 +477,9 @@ impl App {
                 }
                 Event::Keyboard(keyboard::Event::ModifiersChanged(modifiers)) => {
                     Some(Message::ModifiersChanged(modifiers))
+                }
+                Event::Mouse(mouse::Event::CursorMoved { position }) => {
+                    Some(Message::CursorMoved(position))
                 }
                 Event::Window(window::Event::FileDropped(path)) => Some(Message::FileDropped(path)),
                 Event::Window(window::Event::Opened {
@@ -807,15 +813,9 @@ impl App {
         };
 
         let node_index = flat_row.node_index;
-        let row_index = flat_row.row_index;
-        let toolbar_height = 60.0;
-        let y_pos =
-            toolbar_height + (row_index as f32 * ROW_HEIGHT) - self.scroll_offset + ROW_HEIGHT;
-        let estimated_depth = flat_row.prefix.len() / 4;
-        let x_pos = 50.0 + (estimated_depth as f32 * 15.0);
 
         mouse_area(row_container)
-            .on_right_press(Message::ShowContextMenu(node_index, x_pos, y_pos))
+            .on_right_press(Message::ShowContextMenu(node_index))
             .into()
     }
 
@@ -1046,6 +1046,10 @@ impl App {
                 self.current_modifiers = modifiers;
                 Task::none()
             }
+            Message::CursorMoved(position) => {
+                self.last_cursor_position = position;
+                Task::none()
+            }
             Message::WindowPositionUpdated(position) => {
                 self.last_window_position = Some(position);
                 Task::none()
@@ -1062,7 +1066,7 @@ impl App {
                     return Task::none();
                 }
 
-                let cmd_or_ctrl = modifiers.command() || modifiers.control();
+                let primary_modifier = modifiers.command();
 
                 match key {
                     Key::Named(Named::Escape) => {
@@ -1081,25 +1085,25 @@ impl App {
                             self.update(Message::SearchNext)
                         }
                     }
-                    Key::Character(c) if c.as_str() == "o" && cmd_or_ctrl => {
+                    Key::Character(c) if c.as_str() == "o" && primary_modifier => {
                         self.update(Message::OpenFileDialog)
                     }
-                    Key::Character(c) if c.as_str() == "g" && cmd_or_ctrl => {
+                    Key::Character(c) if c.as_str() == "g" && primary_modifier => {
                         if modifiers.shift() {
                             self.update(Message::SearchPrev)
                         } else {
                             self.update(Message::SearchNext)
                         }
                     }
-                    Key::Character(c) if c.as_str() == "f" && cmd_or_ctrl => {
+                    Key::Character(c) if c.as_str() == "f" && primary_modifier => {
                         self.update(Message::FocusSearch)
                     }
-                    Key::Character(c) if c.as_str() == "n" && cmd_or_ctrl => {
+                    Key::Character(c) if c.as_str() == "n" && primary_modifier => {
                         self.update(Message::OpenEmptyWindow)
                     }
                     Key::Character(c)
                         if c.as_str() == "v"
-                            && cmd_or_ctrl
+                            && primary_modifier
                             && !modifiers.shift()
                             && !modifiers.alt() =>
                     {
@@ -1107,7 +1111,7 @@ impl App {
                     }
                     Key::Character(c)
                         if c.as_str() == "c"
-                            && cmd_or_ctrl
+                            && primary_modifier
                             && !modifiers.shift()
                             && !modifiers.alt() =>
                     {
@@ -1115,20 +1119,22 @@ impl App {
                     }
                     Key::Character(c)
                         if c.as_str() == "c"
-                            && cmd_or_ctrl
+                            && primary_modifier
                             && modifiers.shift()
                             && !modifiers.alt() =>
                     {
                         self.update(Message::CopySelectedName)
                     }
-                    Key::Character(c) if c.as_str() == "c" && cmd_or_ctrl && modifiers.alt() => {
+                    Key::Character(c)
+                        if c.as_str() == "c" && primary_modifier && modifiers.alt() =>
+                    {
                         self.update(Message::CopySelectedPath)
                     }
-                    Key::Character(c) if c.as_str() == "t" && cmd_or_ctrl => {
+                    Key::Character(c) if c.as_str() == "t" && primary_modifier => {
                         self.update(Message::ToggleTheme)
                     }
                     Key::Character(c)
-                        if (c.as_str() == "/" || c.as_str() == "?") && cmd_or_ctrl =>
+                        if (c.as_str() == "/" || c.as_str() == "?") && primary_modifier =>
                     {
                         self.update(Message::ToggleHelp)
                     }
@@ -1180,8 +1186,13 @@ impl App {
                 Task::none()
             }
             Message::CopySelectedValue => {
+                let node_index = self
+                    .context_menu_state
+                    .map(|(node_index, _, _)| node_index)
+                    .or(self.selected_node);
                 self.context_menu_state = None;
-                if let (Some(tree), Some(node_index)) = (&self.tree, self.selected_node)
+                self.context_submenu = ContextSubmenu::None;
+                if let (Some(tree), Some(node_index)) = (&self.tree, node_index)
                     && tree.get_node(node_index).is_some()
                 {
                     let value_string = json_export::format_node_value_for_copy(tree, node_index);
@@ -1190,8 +1201,13 @@ impl App {
                 Task::none()
             }
             Message::CopySelectedPath => {
+                let node_index = self
+                    .context_menu_state
+                    .map(|(node_index, _, _)| node_index)
+                    .or(self.selected_node);
                 self.context_menu_state = None;
-                if let Some(node_index) = self.selected_node
+                self.context_submenu = ContextSubmenu::None;
+                if let Some(node_index) = node_index
                     && let Some(flat_row) =
                         self.flat_rows.iter().find(|r| r.node_index == node_index)
                 {
@@ -1200,8 +1216,13 @@ impl App {
                 Task::none()
             }
             Message::CopySelectedName => {
+                let node_index = self
+                    .context_menu_state
+                    .map(|(node_index, _, _)| node_index)
+                    .or(self.selected_node);
                 self.context_menu_state = None;
-                if let (Some(tree), Some(node_index)) = (&self.tree, self.selected_node)
+                self.context_submenu = ContextSubmenu::None;
+                if let (Some(tree), Some(node_index)) = (&self.tree, node_index)
                     && let Some(node) = tree.get_node(node_index)
                     && let Some(key) = &node.key
                 {
@@ -1256,8 +1277,13 @@ impl App {
                 Task::none()
             }
             Message::ExportJson => {
+                let node_index = self
+                    .context_menu_state
+                    .map(|(node_index, _, _)| node_index)
+                    .or(self.selected_node);
                 self.context_menu_state = None;
-                if let (Some(tree), Some(node_index)) = (&self.tree, self.selected_node) {
+                self.context_submenu = ContextSubmenu::None;
+                if let (Some(tree), Some(node_index)) = (&self.tree, node_index) {
                     let json_string = json_export::node_to_json_string(tree, node_index);
                     Task::perform(
                         async move {
@@ -1277,8 +1303,13 @@ impl App {
                 }
             }
             Message::ExpandAllChildren => {
+                let node_index = self
+                    .context_menu_state
+                    .map(|(node_index, _, _)| node_index)
+                    .or(self.selected_node);
                 self.context_menu_state = None;
-                if let Some(node_index) = self.selected_node {
+                self.context_submenu = ContextSubmenu::None;
+                if let Some(node_index) = node_index {
                     if let Some(tree) = &mut self.tree {
                         Self::set_expanded_recursive(tree, node_index, true);
                     }
@@ -1289,8 +1320,13 @@ impl App {
                 Task::none()
             }
             Message::CollapseAllChildren => {
+                let node_index = self
+                    .context_menu_state
+                    .map(|(node_index, _, _)| node_index)
+                    .or(self.selected_node);
                 self.context_menu_state = None;
-                if let Some(node_index) = self.selected_node {
+                self.context_submenu = ContextSubmenu::None;
+                if let Some(node_index) = node_index {
                     if let Some(tree) = &mut self.tree {
                         Self::set_expanded_recursive(tree, node_index, false);
                     }
@@ -1319,9 +1355,14 @@ impl App {
                 }
                 Task::none()
             }
-            Message::ShowContextMenu(node_index, x, y) => {
+            Message::ShowContextMenu(node_index) => {
                 self.selected_node = Some(node_index);
-                self.context_menu_state = Some((node_index, x, y));
+                self.context_submenu = ContextSubmenu::None;
+                self.context_menu_state = Some((
+                    node_index,
+                    self.last_cursor_position.x,
+                    self.last_cursor_position.y,
+                ));
                 Task::none()
             }
             Message::HideContextMenu => {
@@ -1334,18 +1375,26 @@ impl App {
                 Task::none()
             }
             Message::CopyValueMinified => {
+                let node_index = self
+                    .context_menu_state
+                    .map(|(node_index, _, _)| node_index)
+                    .or(self.selected_node);
                 self.context_menu_state = None;
                 self.context_submenu = ContextSubmenu::None;
-                if let (Some(tree), Some(node_index)) = (&self.tree, self.selected_node) {
+                if let (Some(tree), Some(node_index)) = (&self.tree, node_index) {
                     let minified = json_export::node_to_json_string_minified(tree, node_index);
                     return clipboard::write(minified);
                 }
                 Task::none()
             }
             Message::CopyValueFormatted => {
+                let node_index = self
+                    .context_menu_state
+                    .map(|(node_index, _, _)| node_index)
+                    .or(self.selected_node);
                 self.context_menu_state = None;
                 self.context_submenu = ContextSubmenu::None;
-                if let (Some(tree), Some(node_index)) = (&self.tree, self.selected_node) {
+                if let (Some(tree), Some(node_index)) = (&self.tree, node_index) {
                     let json = json_export::node_to_json_string(tree, node_index);
                     if let Ok(value) = serde_json::from_str::<serde_json::Value>(&json)
                         && let Ok(formatted) = serde_json::to_string_pretty(&value)
@@ -1357,9 +1406,13 @@ impl App {
                 Task::none()
             }
             Message::ExportAsJson => {
+                let node_index = self
+                    .context_menu_state
+                    .map(|(node_index, _, _)| node_index)
+                    .or(self.selected_node);
                 self.context_menu_state = None;
                 self.context_submenu = ContextSubmenu::None;
-                if let (Some(tree), Some(node_index)) = (&self.tree, self.selected_node) {
+                if let (Some(tree), Some(node_index)) = (&self.tree, node_index) {
                     let json_string = json_export::node_to_json_string(tree, node_index);
                     Task::perform(
                         async move {
@@ -1379,9 +1432,13 @@ impl App {
                 }
             }
             Message::ExportAsMinifiedJson => {
+                let node_index = self
+                    .context_menu_state
+                    .map(|(node_index, _, _)| node_index)
+                    .or(self.selected_node);
                 self.context_menu_state = None;
                 self.context_submenu = ContextSubmenu::None;
-                if let (Some(tree), Some(node_index)) = (&self.tree, self.selected_node) {
+                if let (Some(tree), Some(node_index)) = (&self.tree, node_index) {
                     let minified = json_export::node_to_json_string_minified(tree, node_index);
                     Task::perform(
                         async move {
@@ -1401,9 +1458,13 @@ impl App {
                 }
             }
             Message::ExportAsFormattedJson => {
+                let node_index = self
+                    .context_menu_state
+                    .map(|(node_index, _, _)| node_index)
+                    .or(self.selected_node);
                 self.context_menu_state = None;
                 self.context_submenu = ContextSubmenu::None;
-                if let (Some(tree), Some(node_index)) = (&self.tree, self.selected_node) {
+                if let (Some(tree), Some(node_index)) = (&self.tree, node_index) {
                     let json = json_export::node_to_json_string(tree, node_index);
                     let formatted =
                         if let Ok(value) = serde_json::from_str::<serde_json::Value>(&json) {
