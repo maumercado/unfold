@@ -4,7 +4,7 @@ Central index of all planned, in-progress, and completed work for this project.
 
 ## Planned
 
-- None.
+- [GPUI Migration (Phased)](./gpui-migration-plan.md) - Baseline, extract a core crate, spike GPUI with gpui-kit, then port features and platform behavior only if the spike passes.
 
 ## In Progress
 
