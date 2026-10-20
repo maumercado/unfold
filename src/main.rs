@@ -4,18 +4,17 @@
 // Has no effect on macOS/Linux.
 #![windows_subsystem = "windows"]
 
-mod config;
 mod flat_row;
-mod json_export;
 #[cfg(target_os = "macos")]
 mod macos_open;
 mod menu;
 mod message;
-mod parse_error;
-mod parser;
-mod search;
 mod theme;
 mod update_check;
+
+// The UI-free modules live in the unfold-core crate. Importing them by name here keeps
+// paths like `crate::config::Config` and `crate::parser::JsonTree` working across the app.
+use unfold_core::{config, json_export, parse_error, parser, search};
 
 use iced::advanced::widget::operation::focusable;
 use iced::advanced::widget::operation::scrollable::{AbsoluteOffset, scroll_to};
@@ -61,7 +60,7 @@ impl LaunchOptions {
 
 // Re-export from modules
 use config::Config;
-use flat_row::{BUFFER_ROWS, FlatRow, ROW_HEIGHT, ValueType};
+use flat_row::{BUFFER_ROWS, ROW_HEIGHT, ValueTypeColor};
 use menu::try_initialize_menu;
 use message::{ContextSubmenu, Message};
 use parse_error::ParseError;
@@ -69,6 +68,7 @@ use parser::{JsonTree, JsonValue};
 use theme::{
     AppTheme, ThemeColors, button_3d_style_themed, button_toggle_style_themed, get_theme_colors,
 };
+use unfold_core::flat_row::{FlatRow, flatten_visible_nodes};
 use update_check::{UpdateCheckState, fetch_latest_release};
 
 /// Install the CLI tool by creating a symlink in /usr/local/bin
@@ -497,141 +497,6 @@ impl App {
         ])
     }
 
-    /// Flatten the tree into a Vec<FlatRow> for virtual scrolling
-    fn flatten_visible_nodes(tree: &JsonTree) -> Vec<FlatRow> {
-        let mut rows = Vec::new();
-
-        if let Some(root) = tree.get_node(tree.root_index()) {
-            let root_is_array = matches!(root.value, JsonValue::Array);
-            let child_count = root.children.len();
-            for (i, &child_index) in root.children.iter().enumerate() {
-                let is_last = i == child_count - 1;
-                let child_path = if root_is_array {
-                    format!("[{}]", i)
-                } else if let Some(child) = tree.get_node(child_index) {
-                    child.key.as_deref().unwrap_or("").to_string()
-                } else {
-                    String::new()
-                };
-                Self::flatten_node(
-                    tree,
-                    child_index,
-                    &mut rows,
-                    "",
-                    is_last,
-                    false,
-                    &child_path,
-                );
-            }
-        }
-
-        rows
-    }
-
-    /// Recursively flatten a single node and its visible children
-    fn flatten_node(
-        tree: &JsonTree,
-        index: usize,
-        rows: &mut Vec<FlatRow>,
-        prefix: &str,
-        is_last: bool,
-        is_root: bool,
-        current_path: &str,
-    ) {
-        let Some(node) = tree.get_node(index) else {
-            return;
-        };
-
-        let (current_prefix, child_prefix) = if is_root {
-            (String::new(), String::new())
-        } else if node.depth == 1 {
-            let connector = if is_last { "└" } else { "├" };
-            let child = if is_last {
-                "   ".to_string()
-            } else {
-                "│  ".to_string()
-            };
-            (connector.to_string(), child)
-        } else {
-            let connector = if is_last { "└" } else { "├" };
-            let current = format!("{}{}", prefix, connector);
-            let child = if is_last {
-                format!("{}   ", prefix)
-            } else {
-                format!("{}│  ", prefix)
-            };
-            (current, child)
-        };
-
-        let (value_display, value_type) = match &node.value {
-            JsonValue::Null => ("null".to_string(), ValueType::Null),
-            JsonValue::Bool(b) => (b.to_string(), ValueType::Bool),
-            JsonValue::Number(n) => (n.to_string(), ValueType::Number),
-            JsonValue::String(s) => (format!("\"{}\"", s), ValueType::String),
-            JsonValue::Array => {
-                if node.expanded {
-                    (":".to_string(), ValueType::Bracket)
-                } else if node.children.is_empty() {
-                    ("[]".to_string(), ValueType::Key)
-                } else {
-                    ("[...]".to_string(), ValueType::Key)
-                }
-            }
-            JsonValue::Object => {
-                if node.expanded {
-                    (":".to_string(), ValueType::Bracket)
-                } else if node.children.is_empty() {
-                    ("{}".to_string(), ValueType::Key)
-                } else {
-                    ("{...}".to_string(), ValueType::Key)
-                }
-            }
-        };
-
-        let row_index = rows.len();
-
-        rows.push(FlatRow::new(
-            index,
-            current_prefix,
-            node.key.as_ref().map(|k| k.to_string()),
-            value_display,
-            value_type,
-            node.is_expandable(),
-            node.expanded,
-            row_index,
-            current_path.to_string(),
-        ));
-
-        if node.expanded {
-            let is_array = matches!(node.value, JsonValue::Array);
-            let child_count = node.children.len();
-            for (i, &child_index) in node.children.iter().enumerate() {
-                let is_last_child = i == child_count - 1;
-                let child_path = if is_array {
-                    format!("{}[{}]", current_path, i)
-                } else if let Some(child) = tree.get_node(child_index) {
-                    let key = child.key.as_deref().unwrap_or("");
-                    if current_path.is_empty() {
-                        key.to_string()
-                    } else {
-                        format!("{}.{}", current_path, key)
-                    }
-                } else {
-                    current_path.to_string()
-                };
-                Self::flatten_node(
-                    tree,
-                    child_index,
-                    rows,
-                    &child_prefix,
-                    is_last_child,
-                    false,
-                    &child_path,
-                );
-            }
-        }
-    }
-
     /// Render a string as a sequence of text widgets, highlighting matched substrings.
     ///
     /// When the row is a search match, each segment returned by `highlight_segments`
@@ -902,7 +767,7 @@ impl App {
                                     self.parse_error = None;
 
                                     self.flat_rows =
-                                        Self::flatten_visible_nodes(self.tree.as_ref().unwrap());
+                                        flatten_visible_nodes(self.tree.as_ref().unwrap());
 
                                     let new_width = self.calculate_max_width();
                                     return window::latest().and_then(move |window_id| {
@@ -966,7 +831,7 @@ impl App {
                 self.selected_node = Some(index);
                 if let Some(tree) = &mut self.tree {
                     tree.toggle_expanded(index);
-                    self.flat_rows = Self::flatten_visible_nodes(tree);
+                    self.flat_rows = flatten_visible_nodes(tree);
                 }
                 Task::none()
             }
@@ -999,7 +864,7 @@ impl App {
                     self.expand_to_node(node_index);
 
                     if let Some(tree) = &self.tree {
-                        self.flat_rows = Self::flatten_visible_nodes(tree);
+                        self.flat_rows = flatten_visible_nodes(tree);
                     }
 
                     self.scroll_to_node(node_index)
@@ -1025,7 +890,7 @@ impl App {
                     self.expand_to_node(node_index);
 
                     if let Some(tree) = &self.tree {
-                        self.flat_rows = Self::flatten_visible_nodes(tree);
+                        self.flat_rows = flatten_visible_nodes(tree);
                     }
 
                     self.scroll_to_node(node_index)
@@ -1311,10 +1176,10 @@ impl App {
                 self.context_submenu = ContextSubmenu::None;
                 if let Some(node_index) = node_index {
                     if let Some(tree) = &mut self.tree {
-                        Self::set_expanded_recursive(tree, node_index, true);
+                        tree.set_expanded_recursive(node_index, true);
                     }
                     if let Some(tree) = &self.tree {
-                        self.flat_rows = Self::flatten_visible_nodes(tree);
+                        self.flat_rows = flatten_visible_nodes(tree);
                     }
                 }
                 Task::none()
@@ -1328,10 +1193,10 @@ impl App {
                 self.context_submenu = ContextSubmenu::None;
                 if let Some(node_index) = node_index {
                     if let Some(tree) = &mut self.tree {
-                        Self::set_expanded_recursive(tree, node_index, false);
+                        tree.set_expanded_recursive(node_index, false);
                     }
                     if let Some(tree) = &self.tree {
-                        self.flat_rows = Self::flatten_visible_nodes(tree);
+                        self.flat_rows = flatten_visible_nodes(tree);
                     }
                 }
                 Task::none()
@@ -1515,18 +1380,6 @@ impl App {
         }
     }
 
-    /// Recursively set expanded state for a node and all its children
-    fn set_expanded_recursive(tree: &mut JsonTree, node_index: usize, expanded: bool) {
-        tree.set_expanded(node_index, expanded);
-
-        if let Some(node) = tree.get_node(node_index) {
-            let children = node.children.clone();
-            for child_index in children {
-                Self::set_expanded_recursive(tree, child_index, expanded);
-            }
-        }
-    }
-
     /// Run search with current query and options
     fn run_search(&mut self) -> Task<Message> {
         if self.search_query.is_empty() {
@@ -1553,11 +1406,11 @@ impl App {
                 self.search_result_index = Some(0);
                 let target = self.search_results[0];
                 self.expand_to_node(target);
-                self.flat_rows = Self::flatten_visible_nodes(self.tree.as_ref().unwrap());
+                self.flat_rows = flatten_visible_nodes(self.tree.as_ref().unwrap());
                 return self.scroll_to_node(target);
             } else {
                 self.search_result_index = None;
-                self.flat_rows = Self::flatten_visible_nodes(tree);
+                self.flat_rows = flatten_visible_nodes(tree);
             }
         }
 
@@ -2640,51 +2493,6 @@ impl App {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::parser::builder::build_tree;
-    use serde_json::json;
-
-    #[test]
-    fn test_flatten_visible_nodes() {
-        let value = json!({"a": 1, "b": 2});
-        let tree = build_tree(&value);
-
-        let flat_rows = App::flatten_visible_nodes(&tree);
-
-        assert!(!flat_rows.is_empty());
-    }
-
-    #[test]
-    fn test_set_expanded_recursive() {
-        let value = json!({
-            "level1": {
-                "level2": {
-                    "level3": "value"
-                }
-            }
-        });
-        let mut tree = build_tree(&value);
-        let root_index = tree.root_index();
-
-        App::set_expanded_recursive(&mut tree, root_index, true);
-
-        for i in 0..tree.node_count() {
-            if let Some(node) = tree.get_node(i) {
-                if node.is_expandable() {
-                    assert!(node.expanded, "Node {} should be expanded", i);
-                }
-            }
-        }
-
-        App::set_expanded_recursive(&mut tree, root_index, false);
-
-        for i in 0..tree.node_count() {
-            if let Some(node) = tree.get_node(i) {
-                if node.is_expandable() {
-                    assert!(!node.expanded, "Node {} should be collapsed", i);
-                }
-            }
-        }
-    }
 
     #[test]
     fn test_split_initial_open_paths_empty() {

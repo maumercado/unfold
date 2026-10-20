@@ -10,6 +10,12 @@ pub struct JsonTree {
     root_index: usize,
 }
 
+impl Default for JsonTree {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl JsonTree {
     /// Create a new empty tree
     pub fn new() -> Self {
@@ -68,6 +74,18 @@ impl JsonTree {
             && node.is_expandable()
         {
             node.expanded = expanded;
+        }
+    }
+
+    /// Set the expanded state of a node and every node below it
+    pub fn set_expanded_recursive(&mut self, index: usize, expanded: bool) {
+        self.set_expanded(index, expanded);
+
+        if let Some(node) = self.get_node(index) {
+            let children = node.children.clone();
+            for child_index in children {
+                self.set_expanded_recursive(child_index, expanded);
+            }
         }
     }
 
@@ -258,6 +276,42 @@ mod tests {
         // Toggle to collapse again
         tree.toggle_expanded(root_idx);
         assert!(!tree.get_node(root_idx).unwrap().expanded);
+    }
+
+    #[test]
+    fn test_set_expanded_recursive() {
+        use crate::parser::builder::build_tree;
+        use serde_json::json;
+
+        let value = json!({
+            "level1": {
+                "level2": {
+                    "level3": "value"
+                }
+            }
+        });
+        let mut tree = build_tree(&value);
+        let root_index = tree.root_index();
+
+        tree.set_expanded_recursive(root_index, true);
+
+        for i in 0..tree.node_count() {
+            if let Some(node) = tree.get_node(i)
+                && node.is_expandable()
+            {
+                assert!(node.expanded, "Node {} should be expanded", i);
+            }
+        }
+
+        tree.set_expanded_recursive(root_index, false);
+
+        for i in 0..tree.node_count() {
+            if let Some(node) = tree.get_node(i)
+                && node.is_expandable()
+            {
+                assert!(!node.expanded, "Node {} should be collapsed", i);
+            }
+        }
     }
 
     #[test]

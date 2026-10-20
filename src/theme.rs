@@ -6,15 +6,9 @@ use iced::border::Radius;
 use iced::widget::button;
 use iced::widget::button::Status as ButtonStatus;
 use iced::{Border, Color, Shadow};
-use serde::{Deserialize, Serialize};
 
-/// Application theme selection
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
-pub enum AppTheme {
-    #[default]
-    Dark,
-    Light,
-}
+// AppTheme is saved in the config file, so it lives in unfold-core.
+pub use unfold_core::config::AppTheme;
 
 /// All theme-dependent colors in one place
 #[derive(Debug, Clone, Copy)]

@@ -12,19 +12,26 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ```
 unfold/
-├── Cargo.toml
+├── Cargo.toml             # Iced app package + workspace root
 ├── CLAUDE.md              # This file
 ├── README.md              # User-facing documentation
 ├── docs/
 │   └── DESIGN_DECISIONS.md  # Architecture decisions and trade-offs
-└── src/
+├── crates/
+│   └── unfold-core/       # UI-free core: no iced, must stay that way
+│       ├── examples/bench.rs  # Headless load benchmark
+│       └── src/
+│           ├── lib.rs
+│           ├── parser/    # JsonNode, JsonTree (flat array), builder
+│           ├── flat_row.rs   # FlatRow, ValueType, flatten_visible_nodes
+│           ├── search.rs, json_export.rs, config.rs, parse_error.rs
+└── src/                   # Iced app
     ├── main.rs            # App state, UI, keyboard handling, view logic
-    └── parser/
-        ├── mod.rs         # Module exports
-        ├── node.rs        # JsonNode and JsonValue types
-        ├── tree.rs        # JsonTree - flat array storage
-        └── builder.rs     # Build tree from serde_json::Value
+    ├── flat_row.rs        # Row pixel sizes and colors (Iced side)
+    ├── theme.rs, message.rs, menu.rs, update_check.rs, macos_open.rs
 ```
+
+The workspace has two crates. `unfold-core` holds everything that does not draw anything, so a different UI can reuse it. Run tests for both with `cargo test --workspace`.
 
 ## Learning-Focused Development
 

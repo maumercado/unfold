@@ -7,19 +7,21 @@ authors = ["Mauricio Mercado"]
 license = "MIT"
 publish = false  # This is a GUI app, not a library
 
+[workspace]
+members = ["crates/unfold-core"]
+
 [lints.rust]
 unexpected_cfgs = { level = "warn", check-cfg = ['cfg(feature, values("cargo-clippy"))'] }
 
 [dependencies]
+unfold-core = { path = "crates/unfold-core" }
 iced = { version = "0.14.0", features = ["tokio", "advanced", "image"] }
 rfd = "0.16.0"
-regex = "1.11"
 serde = { version = "1.0.228", features = ["derive"] }
 serde_json = "1.0.145"
 muda = "0.17"
 reqwest = { version = "0.12", features = ["json"] }
 semver = "1.0"
-dirs = "6.0"
 
 [target.'cfg(windows)'.build-dependencies]
 winresource = "0.1"
