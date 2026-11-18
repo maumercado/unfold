@@ -161,7 +161,12 @@ impl Viewer {
         cx.notify();
     }
 
-    fn prompt_and_open(&mut self, new_window: bool, window: &mut Window, cx: &mut Context<Self>) {
+    pub fn prompt_and_open(
+        &mut self,
+        new_window: bool,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
         let paths = cx.prompt_for_paths(PathPromptOptions {
             files: true,
             directories: false,
@@ -627,6 +632,12 @@ fn fit_window_width(max_chars: usize, window: &mut Window) {
 impl Render for Viewer {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let colors = Colors::for_theme(settings::theme(cx));
+
+        // Keep keyboard shortcuts working: if focus was lost (a closed dialog,
+        // a click on a native menu), give it back to the viewer.
+        if window.focused(cx).is_none() {
+            window.focus(&self.focus_handle, cx);
+        }
 
         let body = match &self.state {
             LoadState::Empty => self.render_welcome(colors, cx).into_any_element(),
@@ -1216,5 +1227,22 @@ mod ui_tests {
             );
         })
         .unwrap();
+    }
+
+    /// Cmd+O / File > Open in a window must use that window, even when
+    /// nothing inside it has keyboard focus (e.g. right after launch or
+    /// after a dialog closed). It used to fall through to the app-level
+    /// handler, which always opened a second window.
+    #[gpui_kit::test]
+    fn open_file_without_focus_reuses_the_window(cx: &mut TestAppContext) {
+        let (window, _) = setup(cx, json!({"a": 1}));
+        cx.update(crate::register_app_actions);
+        cx.update_window(window.into(), |_, window, cx| {
+            window.render_frame(cx);
+            window.blur(cx);
+            window.dispatch_action(Box::new(crate::actions::OpenFile), cx);
+        })
+        .unwrap();
+        assert_eq!(cx.update(|cx| cx.windows().len()), 1);
     }
 }

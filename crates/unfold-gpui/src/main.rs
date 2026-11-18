@@ -22,6 +22,7 @@ use std::path::PathBuf;
 
 use futures::StreamExt as _;
 use futures::channel::mpsc;
+use gpui_kit::base::Root;
 use gpui_kit::*;
 
 use actions::*;
@@ -105,7 +106,7 @@ fn print_help() {
 
 /// Commands that work without any window, e.g. from the menu bar after the
 /// last window closed on macOS.
-fn register_app_actions(cx: &mut App) {
+pub(crate) fn register_app_actions(cx: &mut App) {
     cx.on_action(|_: &Quit, cx| cx.quit());
     cx.on_action(|_: &NewWindow, cx| {
         open_window(None, cx);
@@ -114,16 +115,12 @@ fn register_app_actions(cx: &mut App) {
     cx.on_action(|_: &HideOthers, cx| cx.hide_other_apps());
     cx.on_action(|_: &ShowAll, cx| cx.unhide_other_apps());
     cx.on_action(|_: &ToggleTheme, cx| settings::toggle_theme(None, cx));
-    // With no window open, "Open..." opens one and asks for a file there.
-    cx.on_action(|_: &OpenFile, cx| {
-        if let Some((window, _)) = open_window(None, cx) {
-            window
-                .update(cx, |_, window, cx| {
-                    window.dispatch_action(Box::new(OpenFile), cx)
-                })
-                .ok();
-        }
-    });
+    // Reaches here when no view in the window handled it, e.g. nothing had
+    // keyboard focus, or no window is open. Ask in the active window (or any
+    // window); only open a new one when there is none.
+    // The action arrives while its window is being updated, and a window
+    // cannot be read during its own update, so do the work right after.
+    cx.on_action(|_: &OpenFile, cx| cx.defer(prompt_in_some_window));
     cx.on_action(|_: &Minimize, cx| {
         if let Some(window) = cx.active_window() {
             window
@@ -160,18 +157,40 @@ fn file_url_to_path(url: &str) -> Option<PathBuf> {
 }
 
 /// Open `path` in an empty window if one exists, otherwise in a new window.
+fn prompt_in_some_window(cx: &mut App) {
+    let target = cx
+        .active_window()
+        .and_then(|w| viewer_in(w, cx))
+        .or_else(|| cx.windows().into_iter().find_map(|w| viewer_in(w, cx)))
+        .or_else(|| {
+            let (window, viewer) = open_window(None, cx)?;
+            Some((window.downcast::<Root>()?, viewer))
+        });
+    if let Some((window, viewer)) = target {
+        window
+            .update(cx, |_, window, cx| {
+                viewer.update(cx, |v, cx| v.prompt_and_open(false, window, cx));
+            })
+            .ok();
+    }
+}
+
+/// The viewer shown in a window, if the window is one of ours.
+fn viewer_in(window: AnyWindowHandle, cx: &App) -> Option<(WindowHandle<Root>, Entity<Viewer>)> {
+    let window = window.downcast::<Root>()?;
+    let viewer = window
+        .read(cx)
+        .ok()?
+        .view()
+        .clone()
+        .downcast::<Viewer>()
+        .ok()?;
+    Some((window, viewer))
+}
+
 fn open_path_somewhere(path: PathBuf, cx: &mut App) {
-    for handle in cx.windows() {
-        let Some(handle) = handle.downcast::<gpui_kit::base::Root>() else {
-            continue;
-        };
-        let viewer = handle
-            .read(cx)
-            .ok()
-            .and_then(|root| root.view().clone().downcast::<Viewer>().ok());
-        if let Some(viewer) = viewer
-            && viewer.read(cx).is_empty()
-        {
+    for (handle, viewer) in cx.windows().into_iter().filter_map(|w| viewer_in(w, cx)) {
+        if viewer.read(cx).is_empty() {
             let path = path.clone();
             handle
                 .update(cx, |_, window, cx| {
