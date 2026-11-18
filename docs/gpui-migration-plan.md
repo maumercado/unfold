@@ -1,6 +1,24 @@
 # GPUI Migration (Phased)
 
-Status: **Planned**
+Status: **In progress**: Phases 0 to 2 built, Phase 3 mostly built, waiting on hand checks and the go or no-go call.
+
+## Progress
+
+| Phase | State | Where |
+|---|---|---|
+| 0. Baseline | Done (headless numbers; window numbers still open) | `migration/phase-0-baseline`, `gpui-baseline.md` |
+| 1. Extract the core | Done | `migration/phase-1-core` |
+| 2. GPUI spike | Built and tested headless. See `gpui-spike-results.md` | `migration/phase-2-gpui-spike` |
+| 3. Feature parity | Mostly built in the spike, see the results doc | `migration/phase-2-gpui-spike` |
+| 4. Platform behavior | Partly: menu bar, open events, drops, multi window in one process | `migration/phase-2-gpui-spike` |
+| 5. Packaging | Not started | |
+
+Changes from the plan, found during the spike:
+* gpui-kit is 0.10.0 now, pinned as `=0.10.0`.
+* The tree uses GPUI's `uniform_list` instead of gpui-kit's `VirtualList` (fixed row height, no per-row size vector).
+* The core crate keeps JSON key order from the file (`serde_json/preserve_order`), because GPUI turns that on for the whole build anyway.
+* The Iced app stayed at the repository root instead of moving to `crates/unfold-iced`. The GPUI app is `crates/unfold-gpui`.
+* Windows open in one process, so `LaunchOptions`, `--spawn-handoff` and `macos_open.rs` are not needed in the GPUI build.
 
 ## Goal
 
@@ -25,7 +43,7 @@ The heavy part is `main.rs` (2,769 lines), which holds app state, `update`, and 
 A Cargo workspace with three crates:
 1. `unfold-core`: parser, row flattening (`flatten_visible_nodes` and `flatten_node`, currently methods on `App`), search, export, config, parse errors. No UI dependency. It returns a plain `ValueType` and each UI maps that to a color.
 2. `unfold-iced`: the current app, same behavior.
-3. `unfold-gpui`: the new app on gpui-kit, pinned to an exact version (0.7.3 when this was written).
+3. `unfold-gpui`: the new app on gpui-kit, pinned to an exact version (0.7.3 when this was written, 0.10.0 now).
 
 ### One design choice up front
 

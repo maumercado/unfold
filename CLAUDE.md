@@ -18,20 +18,32 @@ unfold/
 ├── docs/
 │   └── DESIGN_DECISIONS.md  # Architecture decisions and trade-offs
 ├── crates/
-│   └── unfold-core/       # UI-free core: no iced, must stay that way
-│       ├── examples/bench.rs  # Headless load benchmark
+│   ├── unfold-core/       # UI-free core: no iced or gpui, must stay that way
+│   │   ├── examples/bench.rs  # Headless load benchmark
+│   │   └── src/
+│   │       ├── lib.rs
+│   │       ├── parser/    # JsonNode, JsonTree (flat array), builder
+│   │       ├── flat_row.rs   # FlatRow, ValueType, flatten_visible_nodes
+│   │       ├── search.rs, json_export.rs, config.rs, parse_error.rs
+│   └── unfold-gpui/       # GPUI app (gpui-kit), migration in progress
 │       └── src/
-│           ├── lib.rs
-│           ├── parser/    # JsonNode, JsonTree (flat array), builder
-│           ├── flat_row.rs   # FlatRow, ValueType, flatten_visible_nodes
-│           ├── search.rs, json_export.rs, config.rs, parse_error.rs
+│           ├── main.rs    # App start, windows, Finder open events
+│           ├── viewer.rs  # The window view: toolbar, tree, status bar, screens
+│           ├── document.rs   # Open file + search state, no GPUI (unit tested)
+│           ├── row.rs     # FlatRow -> one line of text + color spans
+│           ├── actions.rs, menus.rs, dialogs.rs, settings.rs, theme.rs
 └── src/                   # Iced app
     ├── main.rs            # App state, UI, keyboard handling, view logic
     ├── flat_row.rs        # Row pixel sizes and colors (Iced side)
     ├── theme.rs, message.rs, menu.rs, update_check.rs, macos_open.rs
 ```
 
-The workspace has two crates. `unfold-core` holds everything that does not draw anything, so a different UI can reuse it. Run tests for both with `cargo test --workspace`.
+The workspace has three crates. `unfold-core` holds everything that does not draw anything, so both UIs reuse it. The Iced app (root) is still the shipping app; `unfold-gpui` is the replacement being built (see `docs/gpui-migration-plan.md`). Run all tests with `cargo test --workspace`, and the GPUI app with `cargo run -p unfold-gpui -- file.json`.
+
+GPUI notes:
+* Commands are GPUI actions (`actions.rs`); key bindings use key contexts, so a focused text input's own bindings win over the viewer's.
+* UI tests use gpui-kit's headless harness (`#[gpui_kit::test]`, see `viewer.rs` `ui_tests`). Elements need `.test_support()` to be findable.
+* gpui-kit is pinned with `=`; upgrade on purpose and rerun `cargo test --workspace`.
 
 ## Learning-Focused Development
 
