@@ -2,6 +2,17 @@
 
 All notable changes to Unfold will be documented in this file.
 
+## [2.0.0](https://github.com/maumercado/unfold/compare/v1.5.7...v2.0.0) (2026-11-18)
+
+
+### ⚠ BREAKING CHANGES
+
+* windows now share one process, and object keys are shown in file order instead of alphabetically.
+
+### Features
+
+* move the app from Iced to GPUI ([#21](https://github.com/maumercado/unfold/issues/21)) ([8622c61](https://github.com/maumercado/unfold/commit/8622c61929b8486b22d5c616280a730046c7e7fc))
+
 ## [1.5.7](https://github.com/maumercado/unfold/compare/v1.5.6...v1.5.7) (2026-05-27)
 
 
