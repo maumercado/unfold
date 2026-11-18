@@ -239,7 +239,7 @@ mod tests {
 
     #[test]
     fn test_flatten_collapsed_containers_show_placeholders() {
-        // serde_json keeps object keys sorted, so rows come out in key order
+        // Rows come out in the key order of the file (serde_json preserve_order)
         let tree =
             build_tree(&json!({"arr": [1], "empty_arr": [], "empty_obj": {}, "obj": {"x": 1}}));
 
@@ -255,8 +255,8 @@ mod tests {
 
     #[test]
     fn test_flatten_expanded_nodes_build_paths_and_prefixes() {
-        // Keys are sorted: "a" comes first, then "users"
-        let mut tree = build_tree(&json!({"users": [{"email": "a@b.c"}], "a": null}));
+        // Keys keep file order: "a" comes first, then "users"
+        let mut tree = build_tree(&json!({"a": null, "users": [{"email": "a@b.c"}]}));
         let root = tree.root_index();
         tree.set_expanded_recursive(root, true);
 
@@ -276,7 +276,7 @@ mod tests {
 
     #[test]
     fn test_flatten_non_last_parent_keeps_vertical_line() {
-        // Keys are sorted: "a" (with a child) comes before "z"
+        // "a" (with a child) comes before "z", the last key
         let mut tree = build_tree(&json!({"a": {"x": 1}, "z": 2}));
         let root = tree.root_index();
         tree.set_expanded_recursive(root, true);
@@ -287,6 +287,16 @@ mod tests {
         assert_eq!(rows[1].prefix, "│  └");
         assert_eq!(rows[1].path, "a.x");
         assert_eq!(rows[2].prefix, "└");
+    }
+
+    #[test]
+    fn test_flatten_keeps_file_key_order() {
+        let tree = build_tree(&json!({"zebra": 1, "apple": 2, "mango": 3}));
+
+        let rows = flatten_visible_nodes(&tree);
+        let keys: Vec<&str> = rows.iter().filter_map(|r| r.key.as_deref()).collect();
+
+        assert_eq!(keys, vec!["zebra", "apple", "mango"]);
     }
 
     #[test]
