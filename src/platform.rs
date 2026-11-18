@@ -1,9 +1,10 @@
 //! OS integration that GPUI does not cover: the CLI symlink and launching the
 //! user's text editor.
 
-use std::env;
-use std::path::{Path, PathBuf};
+use std::path::Path;
 use std::process::Command;
+#[cfg(unix)]
+use std::{env, path::PathBuf};
 
 /// Symlink this executable to /usr/local/bin/unfold, asking for an admin
 /// password through the native macOS prompt.
