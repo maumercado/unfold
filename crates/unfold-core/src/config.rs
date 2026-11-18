@@ -6,7 +6,16 @@ use serde::{Deserialize, Serialize};
 use std::fs;
 use std::path::PathBuf;
 
-use crate::theme::AppTheme;
+/// Application theme selection
+///
+/// Lives here (not in the UI crate) because it is saved in the config file.
+/// Each UI maps it to its own colors.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
+pub enum AppTheme {
+    #[default]
+    Dark,
+    Light,
+}
 
 /// User configuration that persists between sessions
 #[derive(Debug, Clone, Serialize, Deserialize)]

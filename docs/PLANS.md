@@ -8,7 +8,7 @@ Central index of all planned, in-progress, and completed work for this project.
 
 ## In Progress
 
-- None.
+- [GPUI Migration](./gpui-migration-plan.md) - Move the UI from Iced to GPUI (gpui-kit) in phases. Spike results: [gpui-spike-results.md](./gpui-spike-results.md).
 
 ## Completed
 
