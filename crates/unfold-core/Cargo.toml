@@ -11,6 +11,6 @@ dirs = "6.0"
 regex = "1.11"
 serde = { version = "1.0.228", features = ["derive"] }
 # preserve_order: objects keep the key order from the file. GPUI turns this
-# feature on for the whole build anyway, so we set it here to make the order
-# the same in every build (Iced alone used to sort keys alphabetically).
+# feature on for the whole build anyway; setting it here makes the core behave
+# the same when built and tested on its own.
 serde_json = { version = "1.0.145", features = ["preserve_order"] }

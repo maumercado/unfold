@@ -4,46 +4,39 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project Overview
 
-**Unfold** is a high-performance JSON viewer built in Rust with the Iced GUI framework. The project aims to handle multi-gigabyte JSON files with native performance, efficient memory usage, and developer-focused features.
+**Unfold** is a high-performance JSON viewer built in Rust with **GPUI** (through **gpui-kit**). The project aims to handle multi-gigabyte JSON files with native performance, efficient memory usage, and developer-focused features.
 
-**Current Status**: Core viewer implemented with search, keyboard shortcuts, and virtual scrolling.
+**Current Status**: Full viewer (search, copy/export, themes, context menu, menu bar, multiple windows). Moved from Iced to GPUI in v2.0; see `docs/gpui-migration-plan.md` and `docs/DESIGN_DECISIONS.md` (decision 1b).
 
 ## Project Structure
 
 ```
 unfold/
-├── Cargo.toml             # Iced app package + workspace root
-├── CLAUDE.md              # This file
-├── README.md              # User-facing documentation
-├── docs/
-│   └── DESIGN_DECISIONS.md  # Architecture decisions and trade-offs
+├── Cargo.toml             # App package (`unfold` binary) + workspace root
+├── build.rs               # Windows icon resource
+├── assets/                # App icons (icns, ico, png)
+├── scripts/               # Bench JSON generator, macOS document-type plist fixer
+├── docs/                  # Design decisions, plans, GPUI spike results
 ├── crates/
-│   ├── unfold-core/       # UI-free core: no iced or gpui, must stay that way
-│   │   ├── examples/bench.rs  # Headless load benchmark
-│   │   └── src/
-│   │       ├── lib.rs
-│   │       ├── parser/    # JsonNode, JsonTree (flat array), builder
-│   │       ├── flat_row.rs   # FlatRow, ValueType, flatten_visible_nodes
-│   │       ├── search.rs, json_export.rs, config.rs, parse_error.rs
-│   └── unfold-gpui/       # GPUI app (gpui-kit), migration in progress
+│   └── unfold-core/       # UI-free core: no GPUI, must stay that way
+│       ├── examples/bench.rs  # Headless load benchmark
 │       └── src/
-│           ├── main.rs    # App start, windows, Finder open events
-│           ├── viewer.rs  # The window view: toolbar, tree, status bar, screens
-│           ├── document.rs   # Open file + search state, no GPUI (unit tested)
-│           ├── row.rs     # FlatRow -> one line of text + color spans
-│           ├── actions.rs, menus.rs, dialogs.rs, settings.rs, theme.rs
-└── src/                   # Iced app
-    ├── main.rs            # App state, UI, keyboard handling, view logic
-    ├── flat_row.rs        # Row pixel sizes and colors (Iced side)
-    ├── theme.rs, message.rs, menu.rs, update_check.rs, macos_open.rs
+│           ├── parser/    # JsonNode, JsonTree (flat array), builder
+│           ├── flat_row.rs   # FlatRow, ValueType, flatten_visible_nodes
+│           ├── search.rs, json_export.rs, config.rs, parse_error.rs
+└── src/                   # GPUI app
+    ├── main.rs            # Startup, CLI args, windows, Finder open events
+    ├── viewer.rs          # The window view: toolbar, tree, status bar, screens, UI tests
+    ├── document.rs        # Open file + selection + search state, no GPUI (unit tested)
+    ├── row.rs             # FlatRow -> one line of text + color spans
+    ├── actions.rs         # Every command as a GPUI action + key bindings
+    ├── menus.rs           # Native menu bar
+    ├── dialogs.rs         # Shortcuts, About, update check, messages
+    ├── settings.rs        # Global persisted Config (theme, CLI installed)
+    ├── theme.rs           # Dark/light colors
+    ├── platform.rs        # CLI symlink install, open in text editor
+    └── update_check.rs    # GitHub releases check (blocking, background thread)
 ```
-
-The workspace has three crates. `unfold-core` holds everything that does not draw anything, so both UIs reuse it. The Iced app (root) is still the shipping app; `unfold-gpui` is the replacement being built (see `docs/gpui-migration-plan.md`). Run all tests with `cargo test --workspace`, and the GPUI app with `cargo run -p unfold-gpui -- file.json`.
-
-GPUI notes:
-* Commands are GPUI actions (`actions.rs`); key bindings use key contexts, so a focused text input's own bindings win over the viewer's.
-* UI tests use gpui-kit's headless harness (`#[gpui_kit::test]`, see `viewer.rs` `ui_tests`). Elements need `.test_support()` to be findable.
-* gpui-kit is pinned with `=`; upgrade on purpose and rerun `cargo test --workspace`.
 
 ## Learning-Focused Development
 
@@ -59,84 +52,30 @@ GPUI notes:
 ## Development Commands
 
 ```bash
-# Run in development mode
-cargo run
-
-# Run with release optimizations (faster)
-cargo run --release
-
-# Run tests
-cargo test
-
-# Format code
-cargo fmt
-
-# Lint code
-cargo clippy
-
-# Type-check without building
-cargo check
+cargo run -- path/to/file.json        # Run (debug)
+cargo run --release -- file.json      # Run (fast)
+cargo test --workspace                # All tests (app + core)
+cargo fmt --all
+cargo clippy --workspace --all-targets -- -D warnings   # Same as CI
+cargo bundle --release                # macOS .app (cargo install cargo-bundle --locked)
+python3 scripts/gen_test_json.py      # Large test files into bench-data/ (git-ignored)
 ```
 
-## Current Dependencies
+## Dependencies
 
 ```toml
-[dependencies]
-iced = { version = "0.14.0", features = ["tokio", "advanced"] }
-rfd = "0.16.0"           # File dialogs
-regex = "1.11"           # RegEx search
-serde = { version = "1.0", features = ["derive"] }
-serde_json = "1.0"
+unfold-core = { path = "crates/unfold-core" }  # parser, search, export, config
+gpui-kit = "=0.10.0"   # GPUI + components (Button, Input, Dialog, NativeMenu, Scrollbar)
+futures = "0.3"        # Channel for Finder open events
+reqwest = { ..., features = ["blocking", "json", "rustls-tls"] }  # Update check
+semver, serde, serde_json, image (window icon)
 ```
 
-## Implemented Features (v0.1.0)
-
-### Core Viewer
-- [x] Open and parse JSON files
-- [x] Tree view with expand/collapse (Dadroit-style alignment)
-- [x] Virtual scrolling (render only visible nodes)
-- [x] Syntax highlighting (keys, strings, numbers, booleans, null)
-- [x] Zebra striping for readability
-- [x] Dynamic window title showing filename
-- [x] Status bar with node count and load time
-
-### Search
-- [x] Text search with highlighting (always searches both keys and values)
-- [x] Case-sensitive toggle (Aa button)
-- [x] RegEx search toggle (.* button)
-- [x] Navigate between results (Prev/Next buttons)
-- [x] Auto-expand path to search results
-- [x] Auto-scroll to current result
-
-### Keyboard Shortcuts
-- [x] `Cmd/Ctrl+O` - Open file
-- [x] `Cmd/Ctrl+F` - Focus search input
-- [x] `Enter` - Next search result (works in search input too)
-- [x] `Shift+Enter` - Previous search result
-- [x] `Escape` - Clear search
-- [x] `Cmd/Ctrl+G` / `Cmd/Ctrl+Shift+G` - Navigate results (alternative)
-
-## Remaining for v1.0
-
-### High Priority
-- [ ] Copy node value to clipboard
-- [ ] Show node path on selection (e.g., `root.users[2].email`)
-- [ ] Better error messages for parse failures
-
-### Medium Priority
-- [ ] Dark/light theme toggle
-- [ ] Multiple file tabs
-- [ ] JSON formatting (pretty print, minify)
-
-### Lower Priority (maybe v1.1)
-- [ ] JSON-Lines / ndjson support
-- [ ] File watching and auto-refresh
-- [ ] Structural diff / comparison view
-- [ ] Export selected node
+`unfold-core` uses `serde_json` with `preserve_order`, so object keys keep file order.
 
 ## Architecture
 
-### Key Data Structures
+### Key Data Structures (unfold-core)
 
 ```rust
 // Flat array storage for cache efficiency
@@ -153,100 +92,35 @@ pub struct JsonNode {
     pub children: Vec<usize>,  // Indices into nodes array
     pub expanded: bool,
 }
-
-pub enum JsonValue {
-    Null,
-    Bool(bool),
-    Number(f64),
-    String(String),
-    Array,
-    Object,
-}
 ```
 
-### App State (in main.rs)
+`flatten_visible_nodes` turns the tree into `Vec<FlatRow>` (one per visible line), rebuilt after expand/collapse.
 
-```rust
-struct App {
-    tree: Option<JsonTree>,
-    current_file: Option<PathBuf>,
-    flat_rows: Vec<FlatRow>,      // Pre-computed for virtual scrolling
-    scroll_offset: f32,
-    viewport_height: f32,
-    // Search state
-    search_query: String,
-    search_results: Vec<usize>,
-    search_result_index: Option<usize>,
-    search_case_sensitive: bool,
-    search_use_regex: bool,
-    current_modifiers: Modifiers,  // For Shift+Enter detection
-    // Widget IDs
-    tree_scrollable_id: WidgetId,
-    search_input_id: WidgetId,
-}
-```
+### GPUI App
 
-### Message-Driven Architecture (Elm-style)
-
-```rust
-enum Message {
-    OpenFileDialog,
-    FileSelected(Option<PathBuf>),
-    ToggleNode(usize),
-    Scrolled(Viewport),
-    SearchQueryChanged(String),
-    SearchNext,
-    SearchPrev,
-    SearchSubmit,          // From text input, checks modifiers
-    ToggleCaseSensitive,
-    ToggleRegex,
-    KeyPressed(Key, Modifiers),
-    ModifiersChanged(Modifiers),
-    ClearSearch,
-    FocusSearch,
-}
-```
+- **Views**: `Viewer` (one per window) implements `Render`. It lives in an `Entity<Viewer>`; handlers get `&mut Viewer` through `cx.listener(...)`, change state, and call `cx.notify()`.
+- **State split**: `Viewer` holds GPUI things (focus, search input, scroll handle) and a `LoadState` (`Empty`, `Loading`, `Loaded(Document)`, `Failed(ParseError)`). `Document` holds the tree, rows, selection and search, with no GPUI types, so it is unit tested directly.
+- **Actions, not messages**: every command is an action in `actions.rs`. Key bindings, menu items, context menu items and buttons all trigger the same actions. Handlers are registered with `.on_action(...)` on the viewer's root element.
+- **Key contexts**: viewer bindings use the `Viewer` context. A focused text input (`Input` context) is deeper, so its own Cmd+C / Cmd+V / Enter bindings win. Enter in the search box propagates to our `enter` binding, so do not also handle `InputEvent::PressEnter`.
+- **Focus**: actions only reach the viewer when focus is inside it. The viewer re-focuses itself when the window has no focus; the app-level `OpenFile` fallback prompts in the active window (deferred, because a window cannot be read during its own update).
+- **Rows**: GPUI `uniform_list` (fixed 16 px rows, renders only visible rows) with `Unconstrained` horizontal sizing, width measured from the widest row. Each row is a single `StyledText` with color highlights from `row::build_row_text`.
+- **Context menu**: right click selects the row, then shows a `NativeMenu`; menu actions act on the selection.
+- **Windows**: one process, many windows (Cmd+N, cascade +32 px). Finder/Dock opens arrive through `Application::on_open_urls` and reuse an empty window if there is one. The app quits when the last window closes.
+- **Background work**: file loading, update checks, CLI install and export writes run in `cx.background_spawn`, then update the view with `cx.spawn_in(window, ...)`. A load generation counter drops stale loads.
+- **Settings**: `Config` lives in a GPUI global (`settings.rs`); theme changes apply to every window and to gpui-component's theme.
+- **Platform modifier**: bindings write `secondary-x`, resolved to Cmd on macOS and Ctrl elsewhere via `KeyBinding::load` (`KeyBinding::new` does not understand `secondary`).
 
 ## Design Decisions
 
-See `docs/DESIGN_DECISIONS.md` for detailed rationale on:
-- Why Iced (not Tauri)
-- Why flat array (not tree pointers)
-- Why index-based children (not Box/Rc)
-
-### Key Patterns Used
-
-1. **Virtual Scrolling**: Only render visible rows + buffer
-2. **FlatRow Pre-computation**: Flatten tree on change, not on render
-3. **Modifier Tracking**: Track keyboard modifiers globally for Shift+Enter in text input
-4. **Widget Operations**: Use `operate(focusable::focus(id))` for programmatic focus
-
-## Recent Architecture Decisions
-
-### Launch Options for Multi-Window Behavior
-
-- Child windows are launched as new processes with explicit launch options (`--window-x`, `--window-y`, `--spawn-handoff`).
-- Window position is tracked from runtime window events and new windows use a fixed cascade offset (`+32,+32`).
-- File-open handoff children on macOS disable open-event spawning to prevent recursive process loops.
-
-### Event Routing Strategy
-
-- Keyboard handling now routes through `event::listen_with` with event status.
-- App-level shortcuts only run for ignored events to avoid conflicting with focused widget input behavior.
-- App-level shortcuts use `Modifiers::command()` as the platform-primary modifier (`Cmd` on macOS, `Ctrl` elsewhere); do not OR in raw `control()` on macOS.
-- Native predefined Copy/Paste menu items are avoided because they can intercept macOS accelerators before Iced text inputs receive them.
-
-### Context Menu Targeting
-
-- Right-click context menus track the latest cursor position from mouse move events instead of estimating coordinates from virtual row index and scroll offset.
-- Context-menu actions prefer the node stored in `context_menu_state`; keyboard shortcuts continue using `selected_node`.
+See `docs/DESIGN_DECISIONS.md` for the rationale on the UI framework (Iced, then GPUI), the flat array tree, and index-based children.
 
 ## Performance Considerations
 
-- **Virtual scrolling**: Only visible rows are rendered
-- **Pre-computed FlatRows**: Tree flattening happens once per expand/collapse
-- **Index-based tree**: Better cache locality than pointer-based
-- **Subscription filtering**: Only emit messages for events we handle
+- **Virtual scrolling**: `uniform_list` renders only visible rows (about 1 ms CPU per frame at 1M rows)
+- **Pre-computed FlatRows**: flattening happens once per expand/collapse, never per frame
+- **One text element per row**: color spans instead of one element per colored piece
+- **Index-based tree**: better cache locality than pointer-based
+- **Background parsing**: the window stays responsive while big files load
 
 ## Coding Guidelines
 
@@ -271,20 +145,27 @@ fn process_node(node: JsonNode) { }  // Takes ownership!
 nodes.iter().collect::<Vec<_>>().len()  // Use .count()
 ```
 
+- Keep GPUI types out of `unfold-core` and `document.rs`/`row.rs`.
+- gpui-kit is pinned with `=`; upgrade on purpose, then rerun `cargo test --workspace`. If the lockfile complains about `wgpu`, run `cargo update -p wgpu --precise <version gpui-kit wants>`.
+
 ## Testing
 
-Tests are in the same file as the code being tested:
+Tests live in the same file as the code. Plain logic uses `#[test]`; UI behavior uses gpui-kit's headless harness:
 
 ```rust
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn test_something() {
-        // ...
-    }
+#[gpui_kit::test]
+fn cmd_c_copies_the_selected_value(cx: &mut TestAppContext) {
+    let (window, _) = setup(cx, json!({"name": "Ada"}));   // see viewer.rs ui_tests
+    cx.update_window(window.into(), |_, window, cx| {
+        window.render_frame(cx);
+        window.click(("row", 0usize), cx);
+        window.press("secondary-c", cx);
+    }).unwrap();
 }
 ```
 
-Run with: `cargo test`
+- Elements must call `.test_support()` (before `.track_focus`) to be found by id.
+- Do not `use super::*` in test modules of files that `use gpui_kit::*`: the glob brings GPUI's `test` macro, which shadows `#[test]`. Import what you need explicitly.
+- Frame-time check (ignored by default): `cargo test --release -- --ignored --nocapture frame_time`
+
+Run all with: `cargo test --workspace`

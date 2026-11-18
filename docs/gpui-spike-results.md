@@ -1,6 +1,6 @@
 # GPUI Spike Results (Phase 2)
 
-Answers to the Phase 2 questions in `gpui-migration-plan.md`, from building `crates/unfold-gpui` on gpui-kit 0.10.0.
+Answers to the Phase 2 questions in `gpui-migration-plan.md`, from building `crates/unfold-gpui` on gpui-kit 0.10.0. That crate has since become the root `unfold` app, and the Iced app was removed. Iced numbers below were taken before the removal.
 
 Status: **automated checks done, hand checks still open.** Everything below marked *measured* or *tested* was run on this branch. Anything that needs eyes on a real window is listed at the end. Mau makes the go or no-go call.
 

@@ -122,7 +122,7 @@ pub fn about(window: &mut Window, cx: &mut App) {
                 v_flex()
                     .gap_1()
                     .text_sm()
-                    .child(format!("Version {}", env!("UNFOLD_VERSION")))
+                    .child(format!("Version {}", env!("CARGO_PKG_VERSION")))
                     .child(
                         div()
                             .text_color(c.text_secondary)
@@ -174,7 +174,7 @@ pub fn update_check(state: &UpdateCheck, window: &mut Window, cx: &mut App) {
                 "You're Up to Date",
                 div().child(format!(
                     "Unfold {} is the latest version.",
-                    env!("UNFOLD_VERSION")
+                    env!("CARGO_PKG_VERSION")
                 )),
                 Some(h_flex().justify_end().child(ok_button("update-ok"))),
             ),

@@ -2,16 +2,14 @@
 //!
 //! Menu items carry the same actions as the key bindings, so shortcuts shown
 //! in the menu come from `actions::bind_keys` and selecting an item runs the
-//! same handler as pressing its keys. No polling, unlike the muda setup in the
-//! Iced app. GPUI draws this as the macOS menu bar; on Windows and Linux it is
+//! same handler as pressing its keys. GPUI draws this as the macOS menu bar; on Windows and Linux it is
 //! not shown, and all commands stay reachable by keyboard and context menu.
 
-use gpui_kit::{App, Menu, MenuItem, OsAction, SystemMenuType};
+use gpui_kit::{App, Menu, MenuItem, SystemMenuType};
 
 use crate::actions::*;
 
 pub fn install(cx: &mut App) {
-    let _ = OsAction::Copy; // keep the import used on every platform
     cx.set_menus([
         Menu::new("Unfold").items([
             MenuItem::action("About Unfold", About),

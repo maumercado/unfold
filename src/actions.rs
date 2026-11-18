@@ -4,7 +4,7 @@
 //! trigger. GPUI dispatches it from the focused element up to the window root,
 //! so the innermost handler wins: when the search box is focused, `cmd-c` hits
 //! the text input's own Copy binding; anywhere else it reaches `CopyValue`.
-//! That routing replaces the Iced app's "was the event captured?" checks.
+//! No "was this key already handled?" checks are needed.
 
 use gpui_kit::{Action, App, KeyBinding, KeyBindingContextPredicate, actions};
 
@@ -64,7 +64,7 @@ pub const VIEWER_CONTEXT: &str = "Viewer";
 type Binding = (&'static str, Box<dyn Action>, Option<&'static str>);
 
 /// Every shortcut. `secondary` means Cmd on macOS and Ctrl elsewhere, the
-/// same rule as `Modifiers::command()` in the Iced app.
+/// usual convention for desktop apps.
 fn bindings() -> Vec<Binding> {
     vec![
         ("secondary-o", Box::new(OpenFile), None),

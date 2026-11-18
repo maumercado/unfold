@@ -1,17 +1,19 @@
 # GPUI Migration (Phased)
 
-Status: **In progress**: Phases 0 to 2 built, Phase 3 mostly built, waiting on hand checks and the go or no-go call.
+Status: **Iced removed; GPUI is the only app.** Remaining: Windows and Linux verification in CI, the hand checks in `gpui-spike-results.md`, and the first GPUI release.
 
 ## Progress
 
-| Phase | State | Where |
-|---|---|---|
-| 0. Baseline | Done (headless numbers; window numbers still open) | `migration/phase-0-baseline`, `gpui-baseline.md` |
-| 1. Extract the core | Done | `migration/phase-1-core` |
-| 2. GPUI spike | Built and tested headless. See `gpui-spike-results.md` | `migration/phase-2-gpui-spike` |
-| 3. Feature parity | Mostly built in the spike, see the results doc | `migration/phase-2-gpui-spike` |
-| 4. Platform behavior | Partly: menu bar, open events, drops, multi window in one process | `migration/phase-2-gpui-spike` |
-| 5. Packaging | Not started | |
+| Phase | State |
+|---|---|
+| 0. Baseline | Done (headless numbers; window numbers still open) |
+| 1. Extract the core | Done |
+| 2. GPUI spike | Done, see `gpui-spike-results.md` |
+| 3. Feature parity | Done |
+| 4. Platform behavior | Done on macOS (menu bar, Finder open events into an empty window, drops, multi window in one process, window icon). Windows and Linux: CI only |
+| 5. Packaging | `cargo bundle` and the document types script verified locally on macOS. The release workflow is unchanged apart from Linux packages and `cargo install cargo-bundle --locked`. Signing, notarizing, and Windows/Linux artifacts are untested until the next release |
+
+The GPUI app was built as `crates/unfold-gpui`, then moved to the repository root as the `unfold` package, replacing the Iced app. The Iced code is in git history (last on `main` before this change).
 
 Changes from the plan, found during the spike:
 * gpui-kit is 0.10.0 now, pinned as `=0.10.0`.

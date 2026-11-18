@@ -1,6 +1,6 @@
 # Unfold
 
-A high-performance JSON viewer built in Rust with the Iced GUI framework.
+A high-performance JSON viewer built in Rust with [GPUI](https://www.gpui.rs/) (via [gpui-kit](https://gpui-kit.com)).
 
 ## Features
 
@@ -8,6 +8,7 @@ A high-performance JSON viewer built in Rust with the Iced GUI framework.
 - **Tree View**: Expand/collapse nodes with Dadroit-style alignment
 - **Syntax Highlighting**: Color-coded keys, strings, numbers, booleans, null
 - **Search**: Text and RegEx search with case-sensitivity toggle
+- **Keeps file order**: Object keys show in the order they appear in the file
 - **Copy Options**: Copy value, key, or JSON path with keyboard shortcuts or context menu
 - **Context Menu**: Right-click for copy options, export, and expand/collapse children
 - **Native Menu Bar**: Full macOS menu bar with all actions
@@ -15,6 +16,7 @@ A high-performance JSON viewer built in Rust with the Iced GUI framework.
 - **Keyboard Shortcuts**: Navigate efficiently without touching the mouse (Cmd+/ to see all)
 - **Check for Updates**: Stay up to date with the latest version
 - **Better Errors**: Parse errors show line numbers for easy debugging
+- **Multiple Windows**: One app, many windows; files opened from Finder reuse an empty window
 
 ## Screenshot
 
@@ -37,26 +39,28 @@ cd unfold
 cargo run --release
 
 # Or create a macOS .app bundle
-cargo install cargo-bundle
+cargo install cargo-bundle --locked
 cargo bundle --release
 ```
 
 ### Requirements
 
-- Rust 1.75+ (2024 edition)
+- Recent stable Rust (2024 edition)
 - macOS, Windows, or Linux
+- Linux build packages: `libxkbcommon-x11-dev libwayland-dev libfontconfig-dev libx11-xcb-dev libvulkan-dev`
 
 ## Usage
 
 ### Opening Files
 
-- Click "Open File" on the welcome screen, or
+- Click "Open" on the welcome screen, or drag and drop a file onto the window, or
 - Press `Cmd+O` (macOS) / `Ctrl+O` (Windows/Linux)
 - Pass a file path as a command-line argument
 
 ### Navigation
 
 - Click nodes to expand/collapse
+- `↑` / `↓` move the selection, `→` / `←` expand and collapse
 - Scroll to navigate large files
 - Use search to find specific values
 
@@ -99,7 +103,9 @@ Press `Cmd+/` to see all shortcuts in-app.
 | Shortcut | Action |
 |----------|--------|
 | `Cmd/Ctrl+O` | Open file |
-| `Cmd/Ctrl+N` | Open in new window |
+| `Cmd/Ctrl+N` | New window |
+| `Cmd/Ctrl+W` | Close window |
+| `Cmd/Ctrl+Shift+E` | Open in external editor |
 | `Cmd/Ctrl+F` | Focus search |
 | `Cmd/Ctrl+T` | Toggle theme |
 | `Cmd/Ctrl+/` | Show keyboard shortcuts |
@@ -109,6 +115,7 @@ Press `Cmd+/` to see all shortcuts in-app.
 | `Enter` | Next search result |
 | `Shift+Enter` | Previous search result |
 | `Escape` | Clear search / close dialogs |
+| `↑` `↓` `→` `←` | Move selection, expand, collapse |
 
 ## Development
 
@@ -119,8 +126,8 @@ cargo run
 # Run with a specific file
 cargo run -- path/to/file.json
 
-# Run tests
-cargo test
+# Run tests (app and core crate)
+cargo test --workspace
 
 # Format code
 cargo fmt
@@ -164,10 +171,8 @@ cargo bundle --release
 ## Tech Stack
 
 - **Language**: Rust
-- **GUI**: [Iced](https://github.com/iced-rs/iced) 0.14
-- **Native Menus**: [muda](https://github.com/tauri-apps/muda) (from Tauri)
+- **GUI**: [GPUI](https://www.gpui.rs/) through [gpui-kit](https://gpui-kit.com) 0.10 (components, native menus, file dialogs)
 - **JSON Parsing**: serde_json
-- **File Dialogs**: rfd
 - **HTTP Client**: reqwest (for update checks)
 - **Version Comparison**: semver
 

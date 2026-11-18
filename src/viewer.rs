@@ -31,7 +31,7 @@ use crate::settings;
 use crate::theme::{AppTheme, Colors};
 use crate::update_check::{self, UpdateCheck};
 
-/// Fixed height per row, same as the Iced app. Tight so tree lines connect.
+/// Fixed height per row. Tight so the tree lines connect.
 pub const ROW_HEIGHT: f32 = 16.0;
 const FONT_SIZE: f32 = 13.0;
 
@@ -495,7 +495,8 @@ impl Viewer {
     }
 
     /// Cmd+V while the tree is focused appends the clipboard to the search,
-    /// same as the Iced app. Inside the search box the input's own paste runs.
+    /// so a copied value can be searched quickly. Inside the search box the
+    /// input's own paste runs.
     fn paste_into_search(
         &mut self,
         _: &PasteIntoSearch,
@@ -619,7 +620,7 @@ fn formatted_json(doc: &Document, node: usize) -> String {
         .unwrap_or(json)
 }
 
-/// Widen the window to fit the widest visible row, like the Iced app does.
+/// Widen the window to fit the widest visible row.
 fn fit_window_width(max_chars: usize, window: &mut Window) {
     let char_width = 8.5;
     let width = (max_chars as f32 * char_width + 80.0).clamp(500.0, 1400.0);
@@ -1190,7 +1191,7 @@ mod ui_tests {
     }
 
     /// Frame cost with a million visible rows. Ignored by default; run with
-    /// `cargo test --release -p unfold-gpui -- --ignored --nocapture frame_time`.
+    /// `cargo test --release -- --ignored --nocapture frame_time`.
     #[gpui_kit::test]
     #[ignore]
     fn frame_time_with_a_million_rows(cx: &mut TestAppContext) {

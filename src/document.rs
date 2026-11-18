@@ -338,7 +338,7 @@ mod tests {
 
     #[test]
     fn load_reports_parse_errors_with_location() {
-        let dir = std::env::temp_dir().join("unfold-gpui-test");
+        let dir = std::env::temp_dir().join("unfold-test");
         fs::create_dir_all(&dir).unwrap();
         let bad = dir.join("bad.json");
         fs::write(&bad, "{\n  \"a\": ,\n}").unwrap();

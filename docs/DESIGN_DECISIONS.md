@@ -8,6 +8,8 @@ This document captures the key design decisions made for the JSON viewer project
 
 ### 1. UI Framework: Iced vs Tauri
 
+> **Superseded (v2.0)**: Unfold moved from Iced to GPUI (via gpui-kit). See decision 1b below and `docs/gpui-migration-plan.md`. The native-over-web reasoning here still holds.
+
 **Decision**: Use Iced for native GUI
 
 **Rationale**:
@@ -29,6 +31,24 @@ This document captures the key design decisions made for the JSON viewer project
 - Faster UI development with web tech
 - But performance bottleneck for large files
 - **Why rejected**: Performance is our core value proposition
+
+---
+
+### 1b. UI Framework: GPUI (gpui-kit) instead of Iced
+
+**Decision**: Rewrite the UI on GPUI, using gpui-kit for components, keep `unfold-core` unchanged.
+
+**Rationale**:
+- Key bindings are matched by focus context: a focused text input's own shortcuts win, so the class of bugs where Cmd+C/Cmd+V in the search box hit app shortcuts (PR 19, PR 20) cannot happen
+- Native menu bar, context menus, file dialogs and Finder open events come with the framework, replacing muda, rfd and an AppKit delegate hook
+- Several windows in one process instead of one process per window
+- Headless UI tests (`#[gpui_kit::test]`) drive real focus, clicks and key bindings
+- `uniform_list` renders only visible rows; measured about 1 ms of CPU per frame at 1M rows
+
+**Trade-offs**:
+- **Con**: gpui-kit is pre-1.0; pinned with `=` and upgraded on purpose
+- **Con**: Larger binary (about 28 MB vs 21 MB)
+- **Con**: GPUI enables `serde_json/preserve_order` for the whole build, so keys show in file order (this was adopted as the behavior)
 
 ---
 
@@ -259,7 +279,7 @@ This document captures the key design decisions made for the JSON viewer project
 - Likely 1.2x-1.5x ratio due to:
   - Index overhead
   - UI state
-  - Iced framework overhead
+  - UI framework overhead
 - Still excellent compared to alternatives (VSCode: 3-5x)
 
 ---
@@ -294,7 +314,7 @@ This document captures the key design decisions made for the JSON viewer project
 - Virtual scrolling (render only visible)
 - Pre-render buffer (smooth scrolling)
 - Optimize rendering path (minimize allocations)
-- GPU-accelerated rendering (Iced handles this)
+- GPU-accelerated rendering (GPUI handles this)
 
 **Reality Check**:
 - May drop to 30 FPS on older hardware
@@ -320,7 +340,10 @@ This document captures the key design decisions made for the JSON viewer project
 
 ---
 
-### Iced
+### GPUI (previously Iced)
+
+*Iced was used until v2.0; see decision 1b.*
+
 
 **Why**:
 - Pure Rust (no FFI overhead)
@@ -479,12 +502,11 @@ This document captures the key design decisions made for the JSON viewer project
 
 ## Risk Mitigation Strategies
 
-### Risk: Iced Immaturity
+### Risk: UI Framework Immaturity
 
 **Mitigation**:
-- Keep UI layer separate (can swap if needed)
-- Contribute back to Iced (build goodwill)
-- Have fallback plan (egui) if Iced blocks progress
+- Keep UI layer separate (`unfold-core` has no UI dependency; this is what made the Iced to GPUI move possible)
+- Pin gpui-kit exactly and upgrade on purpose
 - Start simple, validate approach early
 
 ---

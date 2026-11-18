@@ -2,7 +2,7 @@
 //!
 //! GPUI can draw a whole line with a single `StyledText` and a list of
 //! `(byte range, style)` highlights. That is much cheaper than one element per
-//! colored piece (what the Iced app does), so each visible row becomes exactly
+//! colored piece, so each visible row becomes exactly
 //! one text element.
 //!
 //! This module is pure data: no GPUI types, so it is easy to unit test. The
