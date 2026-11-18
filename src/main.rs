@@ -268,6 +268,20 @@ fn split_initial_open_paths(mut paths: Vec<PathBuf>) -> (Option<PathBuf>, Vec<Pa
     }
 }
 
+/// Decide where files opened from Finder go: the first one into this window
+/// when it shows no file (welcome or parse error screen), the rest into new
+/// windows.
+fn route_opened_paths(
+    window_is_empty: bool,
+    paths: Vec<PathBuf>,
+) -> (Option<PathBuf>, Vec<PathBuf>) {
+    if window_is_empty {
+        split_initial_open_paths(paths)
+    } else {
+        (None, paths)
+    }
+}
+
 pub fn main() -> iced::Result {
     // Handle CLI arguments before starting GUI
     let args: Vec<String> = env::args().collect();
@@ -451,10 +465,11 @@ impl App {
         {
             macos_open::mark_app_ready();
 
-            if !launch_options.spawn_handoff {
-                for late_file in dedupe_paths(macos_open::take_pending_open_files()) {
-                    spawn_unfold_process_with_options(Some(late_file), None, true);
-                }
+            // Files that arrive from now on are picked up by the 50 ms poll
+            // (`Message::FinderOpened`), which reuses this window if it is
+            // still empty. A handoff child only shows the file it was given.
+            if launch_options.spawn_handoff {
+                macos_open::take_pending_open_files();
             }
         }
 
@@ -492,8 +507,16 @@ impl App {
                 _ => None,
             }),
             // Menu events subscription - poll for native menu events every 50ms
-            iced::time::every(std::time::Duration::from_millis(50))
-                .map(|_| menu::try_receive_menu_event().unwrap_or(Message::NoOp)),
+            iced::time::every(std::time::Duration::from_millis(50)).map(|_| {
+                #[cfg(target_os = "macos")]
+                {
+                    let opened = macos_open::take_pending_open_files();
+                    if !opened.is_empty() {
+                        return Message::FinderOpened(opened);
+                    }
+                }
+                menu::try_receive_menu_event().unwrap_or(Message::NoOp)
+            }),
         ])
     }
 
@@ -1110,6 +1133,18 @@ impl App {
                 Task::none()
             }
             Message::NoOp => Task::none(),
+            Message::FinderOpened(paths) => {
+                let (here, elsewhere) =
+                    route_opened_paths(self.tree.is_none(), dedupe_paths(paths));
+                for path in elsewhere {
+                    let position = self.next_window_position();
+                    spawn_unfold_process_with_options(Some(path), position, true);
+                }
+                match here {
+                    Some(path) => self.update(Message::FileSelected(Some(path))),
+                    None => Task::none(),
+                }
+            }
             Message::CheckForUpdates => {
                 self.update_check_state = UpdateCheckState::Checking;
                 Task::perform(
@@ -2553,6 +2588,19 @@ mod tests {
         let position = options.window_position().expect("position should parse");
         assert_eq!(position.x, 120.0);
         assert_eq!(position.y, 340.0);
+    }
+
+    #[test]
+    fn test_finder_open_reuses_an_empty_window() {
+        let paths = vec![PathBuf::from("/tmp/a.json"), PathBuf::from("/tmp/b.json")];
+
+        let (here, elsewhere) = route_opened_paths(true, paths.clone());
+        assert_eq!(here, Some(PathBuf::from("/tmp/a.json")));
+        assert_eq!(elsewhere, vec![PathBuf::from("/tmp/b.json")]);
+
+        let (here, elsewhere) = route_opened_paths(false, paths.clone());
+        assert_eq!(here, None);
+        assert_eq!(elsewhere, paths);
     }
 
     #[test]

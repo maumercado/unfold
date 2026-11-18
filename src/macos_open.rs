@@ -179,21 +179,19 @@ fn route_opened_paths(paths: Vec<PathBuf>) {
         return;
     }
 
-    if APP_READY.load(Ordering::SeqCst) {
-        if !SPAWN_FROM_OPEN_EVENTS.load(Ordering::SeqCst) {
-            return;
-        }
-
-        for path in paths {
-            crate::spawn_unfold_process_with_options(Some(path), None, true);
-        }
-    } else {
-        let mut pending = pending_files()
-            .lock()
-            .expect("pending macOS open-file queue poisoned");
-
-        pending.extend(paths);
+    // Child windows started with --spawn-handoff ignore open events, so a
+    // Finder open can never bounce between processes.
+    if APP_READY.load(Ordering::SeqCst) && !SPAWN_FROM_OPEN_EVENTS.load(Ordering::SeqCst) {
+        return;
     }
+
+    // Queue the paths. Before the app is ready, `boot` picks them up; after,
+    // the app's 50 ms poll does (`Message::FinderOpened`), which loads into the
+    // current window when it is empty and spawns new windows otherwise.
+    pending_files()
+        .lock()
+        .expect("pending macOS open-file queue poisoned")
+        .extend(paths);
 }
 
 unsafe fn extract_paths_from_url_array(urls: *mut Object) -> Vec<PathBuf> {

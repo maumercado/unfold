@@ -55,6 +55,8 @@ pub enum Message {
     ToggleHelp,
     /// No operation (used for menu event polling when no event)
     NoOp,
+    /// Files opened from Finder/Dock while the app is running (macOS)
+    FinderOpened(Vec<PathBuf>),
     /// Check for updates from GitHub
     CheckForUpdates,
     /// Result of update check
