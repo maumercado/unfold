@@ -21,7 +21,7 @@ jobs:
     runs-on: macos-latest
     environment: Production
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           ref: ${{ env.RELEASE_REF }}
 
@@ -116,7 +116,7 @@ jobs:
             "target/release/bundle/osx/Unfold.app"
 
       - name: Upload DMG artifact
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: macos-arm64-dmg
           path: Unfold-*.dmg
@@ -125,7 +125,7 @@ jobs:
     runs-on: macos-15-intel
     environment: Production
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           ref: ${{ env.RELEASE_REF }}
 
@@ -214,7 +214,7 @@ jobs:
             "target/release/bundle/osx/Unfold.app"
 
       - name: Upload DMG artifact
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: macos-intel-dmg
           path: Unfold-*.dmg
@@ -222,7 +222,7 @@ jobs:
   build-windows:
     runs-on: windows-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           ref: ${{ env.RELEASE_REF }}
 
@@ -239,7 +239,7 @@ jobs:
           Compress-Archive -Path target/release/unfold.exe -DestinationPath Unfold-${{ env.RELEASE_TAG }}-windows-x64.zip
 
       - name: Upload artifact
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: windows-x64-zip
           path: Unfold-*.zip
@@ -247,7 +247,7 @@ jobs:
   build-linux:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           ref: ${{ env.RELEASE_REF }}
 
@@ -272,7 +272,7 @@ jobs:
           tar -czf "${RELEASE_DIR}.tar.gz" "$RELEASE_DIR"
 
       - name: Upload artifact
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: linux-x64-tarball
           path: Unfold-*.tar.gz
@@ -284,7 +284,7 @@ jobs:
       contents: write
     steps:
       - name: Download all artifacts
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v8
         with:
           path: artifacts
 
@@ -292,7 +292,7 @@ jobs:
         run: find artifacts -type f
 
       - name: Create GitHub Release
-        uses: softprops/action-gh-release@v2
+        uses: softprops/action-gh-release@v3
         with:
           tag_name: ${{ env.RELEASE_TAG }}
           draft: false
